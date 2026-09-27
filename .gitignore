@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Testing & Linting
+.pytest_cache/
+**/.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+
+# Databases & local storage
+*.db
+*.sqlite3
+storage_data/*
+!storage_data/.gitkeep
+backend/storage_data/*
+!backend/storage_data/.gitkeep
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

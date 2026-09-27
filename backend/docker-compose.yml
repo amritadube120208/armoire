@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: smart_wardrobe_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wardrobe_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wardrobe_secure_password}
+      POSTGRES_DB: ${POSTGRES_DB:-smart_wardrobe}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wardrobe_user} -d ${POSTGRES_DB:-smart_wardrobe}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: smart_wardrobe_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smart_wardrobe_api
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+      - storage_data:/app/storage_data
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-wardrobe_user}:${POSTGRES_PASSWORD:-wardrobe_secure_password}@db:5432/${POSTGRES_DB:-smart_wardrobe}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-wardrobe_user}:${POSTGRES_PASSWORD:-wardrobe_secure_password}@db:5432/${POSTGRES_DB:-smart_wardrobe}
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - STORAGE_BACKEND=local
+      - STORAGE_LOCAL_DIR=/app/storage_data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smart_wardrobe_celery_worker
+    restart: unless-stopped
+    command: celery -A app.workers.tasks.celery_app worker --loglevel=info -c 2
+    volumes:
+      - .:/app
+      - storage_data:/app/storage_data
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-wardrobe_user}:${POSTGRES_PASSWORD:-wardrobe_secure_password}@db:5432/${POSTGRES_DB:-smart_wardrobe}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-wardrobe_user}:${POSTGRES_PASSWORD:-wardrobe_secure_password}@db:5432/${POSTGRES_DB:-smart_wardrobe}
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - STORAGE_BACKEND=local
+      - STORAGE_LOCAL_DIR=/app/storage_data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:
