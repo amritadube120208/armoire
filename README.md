@@ -147,10 +147,11 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 2. Access the Application
-- **Augustine Lookbook Frontend UI**: [http://localhost:8000](http://localhost:8000)
+- **Armoire Frontend UI**: [http://localhost:8000](http://localhost:8000) — sign up or sign in to your own wardrobe. Includes the reference brand film and a consistent ivory/olive design.
+- **Authentication and integration review**: [AUTHENTICATION.md](./AUTHENTICATION.md) — actual code behavior, token flow, frontend changes and remaining security gaps.
 - **Interactive Swagger API Docs**: [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs)
 - **ReDoc API Manual**: [http://localhost:8000/api/v1/redoc](http://localhost:8000/api/v1/redoc)
-- **Pre-Seeded Demo Credentials**:
+- **Optional demo credentials (only after running the demo seeder; never used automatically by the frontend)**:
   - Email: `demo@smartwardrobe.com`
   - Password: `Password123!`
 

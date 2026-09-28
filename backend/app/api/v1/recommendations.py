@@ -121,6 +121,7 @@ async def get_outfit_recommendations(
             "occasion": occasion,
             "recommendations": [],
             "weather": {
+                "source": weather_data.get("source", "unknown"),
                 "temperature": weather_data.get("temperature"),
                 "condition": weather_data.get("condition"),
                 "requirement_band": requirement_band,
@@ -132,6 +133,7 @@ async def get_outfit_recommendations(
         "occasion": occasion,
         "recommendations": [c.to_dict() for c in candidates],
         "weather": {
+            "source": weather_data.get("source", "unknown"),
             "temperature": weather_data.get("temperature"),
             "condition": weather_data.get("condition"),
             "requirement_band": requirement_band,

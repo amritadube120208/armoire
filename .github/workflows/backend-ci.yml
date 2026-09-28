@@ -21,6 +21,14 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Set up Node.js for frontend session tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test frontend authentication client
+        run: node --test backend/tests/frontend/api.test.cjs
+
       - name: Install system dependencies (OpenCV & image libs)
         run: |
           sudo apt-get update
