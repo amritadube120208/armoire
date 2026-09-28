@@ -81,3 +81,36 @@ async def get_refresh_token_from_request(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Refresh token missing from cookie and request body."
     )
+
+
+oauth2_scheme_optional = OAuth2PasswordBearer(
+    tokenUrl=f"{settings.API_V1_STR}/auth/login",
+    auto_error=False
+)
+
+
+async def get_optional_current_user(
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    session: AsyncSession = Depends(get_async_db)
+) -> Optional[User]:
+    """
+    Returns authenticated User if valid token is provided, or None if anonymous.
+    """
+    if not token:
+        return None
+    try:
+        payload = decode_token(token)
+        if not payload or payload.get("type") != "access":
+            return None
+        user_id_str = payload.get("sub")
+        if not user_id_str:
+            return None
+        user_id = uuid.UUID(user_id_str)
+        user_repo = UserRepository(session)
+        user = await user_repo.get_by_id(user_id)
+        if user and user.is_active:
+            return user
+    except Exception:
+        pass
+    return None
+

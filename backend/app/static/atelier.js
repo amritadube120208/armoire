@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = { user: null, occasion: 'casual', category: '', items: [], total: 0, coords: null, mode: 'login', wardrobeVersion: 0, looksVersion: 0, session: 0, uploading: false };
+const state = { user: null, occasion: 'casual', category: '', items: [], total: 0, coords: null, mode: 'login', wardrobeVersion: 0, looksVersion: 0, session: 0, uploading: false, chatHistory: [], chatSending: false };
 const api = createArmoireAPI({ onExpired: () => { if (state.user) { resetAccount(); toast('Please sign in to continue.'); } } });
 // Remove the previous frontend's persisted demo token without reading it.
 try { localStorage.removeItem('sw_token'); } catch { /* Storage may be disabled. */ }
@@ -93,7 +93,25 @@ function renderWardrobe() {
   state.items.forEach(item => {
     const card = document.createElement('article'); card.className = 'garment-card'; const color = item.attributes?.color_primary || ''; const name = item.subtype || item.category || 'New piece';
     const photo = item.image; card.append(imageNode(photo?.enhancement_applied ? photo.enhanced_url || photo.original_url : photo?.thumbnail_url || photo?.original_url, `${color} ${name}`));
-    const details = document.createElement('div'); details.innerHTML = `<h3>${escapeHTML(name)}</h3><p>${escapeHTML(color)}${color ? ' · ' : ''}Worn ${Number(item.wear_count) || 0} times</p><div class="garment-status">${escapeHTML(item.status === 'ready' ? 'Ready to style' : item.status === 'needs_review' ? 'Needs your review' : 'Processing your photo')}</div>`;
+    const details = document.createElement('div');
+    details.innerHTML = `<h3>${escapeHTML(name)}</h3><p>${escapeHTML(color)}${color ? ' · ' : ''}Worn ${Number(item.wear_count) || 0} times</p><div class="garment-meta"><span class="garment-status">${escapeHTML(item.status === 'ready' ? 'Ready to style' : item.status === 'needs_review' ? 'Needs your review' : 'Processing your photo')}</span><button class="garment-delete" title="Remove piece" aria-label="Remove piece">Remove ✕</button></div>`;
+    const deleteBtn = details.querySelector('.garment-delete');
+    if (deleteBtn) {
+      deleteBtn.onclick = async event => {
+        event.stopPropagation();
+        if (confirm(`Remove this ${name} from your wardrobe?`)) {
+          deleteBtn.disabled = true;
+          try {
+            await api.request(`/wardrobe/items/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+            toast(`${name} removed from your wardrobe.`);
+            await Promise.all([loadWardrobe(), loadLooks()]);
+          } catch (error) {
+            toast(errorMessage(error));
+            deleteBtn.disabled = false;
+          }
+        }
+      };
+    }
     card.append(details); $('wardrobeGrid').append(card);
   });
 }
@@ -308,6 +326,127 @@ $('watchButton').onclick = async () => {
     }
   }
 };
+
+function appendChatMessage(role, text) {
+  const container = $('chatMessages');
+  if (!container) return;
+  const msgDiv = document.createElement('div');
+  msgDiv.className = `chat-msg ${role === 'user' ? 'user-msg' : 'stylist-msg'}`;
+  if (role === 'stylist') {
+    const avatar = document.createElement('div');
+    avatar.className = 'msg-avatar';
+    avatar.textContent = '✦';
+    msgDiv.append(avatar);
+  }
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  const paragraphs = String(text || '').split('\n\n').filter(p => p.trim());
+  if (paragraphs.length <= 1) {
+    const p = document.createElement('p');
+    p.textContent = text;
+    bubble.append(p);
+  } else {
+    paragraphs.forEach(paragraphText => {
+      const p = document.createElement('p');
+      p.textContent = paragraphText.trim();
+      bubble.append(p);
+    });
+  }
+  msgDiv.append(bubble);
+  container.append(msgDiv);
+  container.scrollTop = container.scrollHeight;
+  return msgDiv;
+}
+
+function showTypingIndicator() {
+  const container = $('chatMessages');
+  if (!container) return null;
+  const existing = $('chatTypingIndicator');
+  if (existing) existing.remove();
+  const indicator = document.createElement('div');
+  indicator.className = 'chat-typing';
+  indicator.id = 'chatTypingIndicator';
+  indicator.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+  container.append(indicator);
+  container.scrollTop = container.scrollHeight;
+  return indicator;
+}
+
+function removeTypingIndicator() {
+  const indicator = $('chatTypingIndicator');
+  if (indicator) indicator.remove();
+}
+
+async function sendChatMessage(promptText) {
+  const input = $('chatInput');
+  const text = (promptText || input?.value || '').trim();
+  if (!text || state.chatSending) return;
+  
+  if (input) input.value = '';
+  appendChatMessage('user', text);
+  state.chatHistory.push({ role: 'user', content: text });
+  
+  state.chatSending = true;
+  if ($('chatSendBtn')) $('chatSendBtn').disabled = true;
+  showTypingIndicator();
+  
+  try {
+    const payload = {
+      message: text,
+      history: state.chatHistory.slice(-8),
+      occasion: state.occasion,
+      lat: state.coords?.lat,
+      lon: state.coords?.lon
+    };
+    const response = await api.request('/stylist/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    removeTypingIndicator();
+    const reply = response?.reply || "I'm delighted to help you style your next look. What else would you like to explore?";
+    appendChatMessage('stylist', reply);
+    state.chatHistory.push({ role: 'assistant', content: reply });
+  } catch (error) {
+    removeTypingIndicator();
+    appendChatMessage('stylist', `I apologize, I momentarily lost connection to the atelier. ${errorMessage(error)}`);
+  } finally {
+    state.chatSending = false;
+    if ($('chatSendBtn')) $('chatSendBtn').disabled = false;
+    if (input) input.focus();
+  }
+}
+
+if ($('chatForm')) {
+  $('chatForm').onsubmit = event => {
+    event.preventDefault();
+    sendChatMessage();
+  };
+}
+
+if ($('stylistPrompts')) {
+  $('stylistPrompts').addEventListener('click', event => {
+    const chip = event.target.closest('.prompt-chip');
+    if (!chip) return;
+    const prompt = chip.dataset.prompt;
+    if (prompt) {
+      sendChatMessage(prompt);
+    }
+  });
+}
+
+if ($('clearChatBtn')) {
+  $('clearChatBtn').onclick = () => {
+    state.chatHistory = [];
+    const container = $('chatMessages');
+    if (container) {
+      container.innerHTML = '<div class="chat-msg stylist-msg"><div class="msg-avatar">✦</div><div class="msg-bubble"><p>Welcome to your personal style salon. Ask me anything about outfit combinations, color coordination, occasion styling, or what to wear today.</p></div></div>';
+    }
+    toast('Conversation refreshed.');
+  };
+}
+
 resetAccount();
 (async () => {
   if (navigator.geolocation && !state.coords) {
