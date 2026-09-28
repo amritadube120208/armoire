@@ -17,14 +17,34 @@ function empty(target, title, copy, action = '', handler = null) {
 function resetAccount() {
   state.session++; state.wardrobeVersion++; state.looksVersion++; state.user = null; state.items = []; state.total = 0; state.coords = null;
   $('accountButton').textContent = 'Sign in ↗'; $('logoutButton').hidden = true; $('pieceCount').textContent = 'Your collection awaits'; $('loadMore').hidden = true;
-  $('detailDialog').close(); $('detailContent').replaceChildren(); $('uploadReview').replaceChildren(); $('uploadReview').hidden = true; $('photoInput').value = '';
+  if ($('detailDialog')?.open) $('detailDialog').close();
+  $('detailContent').replaceChildren(); $('uploadReview').replaceChildren(); $('uploadReview').hidden = true; $('photoInput').value = '';
   $('uploadStatus').textContent = 'Your original photo stays yours. Enhancements are your choice.';
   $('weatherTemperature').textContent = 'A little forecast. A better outfit.'; $('weatherDescription').textContent = 'Set your location for weather-aware suggestions.'; $('weatherLayers').textContent = 'Your location is used only when you choose.';
-  empty('looksGrid', 'A new perspective on your wardrobe.', 'Sign in to discover outfits made from your own clothes.', 'Make it personal ↗', openAuth);
-  empty('wardrobeGrid', 'Every great wardrobe starts with one piece.', 'Sign in, photograph a favourite, and make room for new combinations.', 'Begin your collection ↗', openAuth);
+  empty('looksGrid', 'A new perspective on your wardrobe.', 'Explore outfits made from your own clothes or try the demo wardrobe.', 'Explore demo looks ↗', () => loginDemo(true));
+  empty('wardrobeGrid', 'Every great wardrobe starts with one piece.', 'Photograph a favourite or explore our curated sample collection.', 'Explore demo pieces ↗', () => loginDemo(true));
   renderTaste({});
 }
-function openAuth() { if (state.user) { $('wardrobe').scrollIntoView(); return; } $('authError').textContent = ''; if (!$('authDialog').open) $('authDialog').showModal(); }
+async function loginDemo(notify = true) {
+  if (state.user && state.user.email === 'demo@smartwardrobe.com') {
+    if (notify) toast('You are exploring the Armoire demonstration wardrobe.');
+    return true;
+  }
+  try {
+    await api.authenticate('login', { email: 'demo@smartwardrobe.com', password: 'Password123!' });
+    state.session++;
+    $('passwordInput').value = '';
+    if ($('authDialog')?.open) $('authDialog').close();
+    await loadProfile();
+    if (notify) toast('Welcome to the Armoire demonstration wardrobe.');
+    await Promise.all([loadWardrobe(), loadLooks()]);
+    return true;
+  } catch (error) {
+    if (notify) toast(`Demo access unavailable: ${errorMessage(error)}`);
+    return false;
+  }
+}
+function openAuth() { if (state.user) { $('wardrobe').scrollIntoView({ behavior: 'smooth' }); return; } $('authError').textContent = ''; if (!$('authDialog').open) $('authDialog').showModal(); }
 function authMode() {
   const signup = state.mode === 'signup'; $('nameField').hidden = !signup;
   $('authTitle').innerHTML = signup ? 'Make it <em>yours.</em>' : 'Welcome <em>back.</em>';
@@ -68,7 +88,7 @@ async function loadWardrobe(append = false) {
   finally { if (version === state.wardrobeVersion) $('loadMore').disabled = false; }
 }
 function renderWardrobe() {
-  if (!state.items.length) { empty('wardrobeGrid', 'A little room for possibility.', state.category ? 'No pieces in this category yet.' : 'Photograph your first piece to start your collection.', 'Add a piece ↗', () => $('studio').scrollIntoView()); return; }
+  if (!state.items.length) { empty('wardrobeGrid', 'A little room for possibility.', state.category ? 'No pieces in this category yet.' : 'Photograph your first piece to start your collection.', 'Add a piece ↗', () => $('studio').scrollIntoView({ behavior: 'smooth' })); return; }
   $('wardrobeGrid').replaceChildren();
   state.items.forEach(item => {
     const card = document.createElement('article'); card.className = 'garment-card'; const color = item.attributes?.color_primary || ''; const name = item.subtype || item.category || 'New piece';
@@ -96,7 +116,7 @@ function renderWeather(weather, defaultLocation = false) {
   $('weatherLayers').textContent = band.required_layers?.length ? `Bring a little comfort: ${band.required_layers.join(', ')}.` : 'Keep it light. A breathable base is a good place to start.';
 }
 function renderLooks(looks) {
-  if (!looks.length) { empty('looksGrid', 'Your next look starts here.', 'Add a few ready-to-wear pieces to discover combinations for this occasion.', 'Visit the studio ↗', () => $('studio').scrollIntoView()); return; }
+  if (!looks.length) { empty('looksGrid', 'Your next look starts here.', 'Add a few ready-to-wear pieces to discover combinations for this occasion.', 'Visit the studio ↗', () => $('studio').scrollIntoView({ behavior: 'smooth' })); return; }
   $('looksGrid').replaceChildren();
   looks.forEach((look, index) => {
     const card = document.createElement('article'); card.className = 'look-card';
@@ -128,7 +148,10 @@ function explain(look) {
 }
 async function upload(file) {
   if (!file || state.uploading) return;
-  if (!state.user) { $('photoInput').value = ''; openAuth(); toast('Sign in, then choose your photo again.'); return; }
+  if (!state.user) {
+    const ok = await loginDemo(false);
+    if (!ok) { $('photoInput').value = ''; openAuth(); toast('Sign in, then choose your photo again.'); return; }
+  }
   if (!['image/jpeg','image/png','image/webp'].includes(file.type)) { $('uploadStatus').textContent = 'Please choose a JPG, PNG or WEBP photo.'; return; }
   if (file.size > 15*1024*1024 || !file.size) { $('uploadStatus').textContent = 'Choose a photo between 1 byte and 15 MB.'; return; }
   const session = state.session; state.uploading = true; $('photoInput').disabled = true; $('uploadReview').hidden = true;
@@ -158,8 +181,29 @@ function renderUploadReview(item) {
     button.onclick = async () => { button.disabled = true; try { await api.request(`/images/${encodeURIComponent(item.id)}/enhance`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) }); toast('Your image choice is saved.'); review.hidden = true; await loadWardrobe(); } catch (error) { toast(errorMessage(error)); button.disabled = false; } }; review.append(button);
   }
 }
-document.addEventListener('click', event => { if (event.target.closest('[data-start]')) openAuth(); const close = event.target.closest('[data-close]'); if (close) $(close.dataset.close).close(); });
-$('accountButton').onclick = openAuth;
+document.addEventListener('click', event => {
+  if (event.target.closest('[data-start]')) {
+    if (state.user) {
+      $('looks').scrollIntoView({ behavior: 'smooth' });
+    } else {
+      openAuth();
+    }
+  }
+  const close = event.target.closest('[data-close]');
+  if (close) {
+    const dialog = $(close.dataset.close);
+    if (dialog && dialog.open) dialog.close();
+  }
+});
+$('accountButton').onclick = () => {
+  if (state.user) {
+    $('wardrobe').scrollIntoView({ behavior: 'smooth' });
+  } else {
+    openAuth();
+  }
+};
+if ($('demoButton')) $('demoButton').onclick = () => loginDemo(true);
+if ($('quickDemoBtn')) $('quickDemoBtn').onclick = () => loginDemo(true);
 $('authToggle').onclick = () => { state.mode = state.mode === 'login' ? 'signup' : 'login'; authMode(); };
 $('authDialog').addEventListener('close', () => { $('passwordInput').value = ''; });
 $('authForm').onsubmit = async event => {
@@ -174,17 +218,83 @@ $('authForm').onsubmit = async event => {
 };
 $('logoutButton').onclick = async () => { $('logoutButton').disabled = true; try { await api.logout(); resetAccount(); toast('You have signed out.'); } catch (error) { toast(`Could not complete sign-out. ${errorMessage(error)}`); } finally { $('logoutButton').disabled = false; } };
 for (const [id, attribute, update] of [['occasions','occasion',loadLooks], ['categories','category',() => loadWardrobe()]]) {
-  $(id).onclick = event => { const button = event.target.closest(`button[data-${attribute}]`); if (!button) return; state[attribute] = button.dataset[attribute]; for (const sibling of $(id).querySelectorAll('button')) { sibling.classList.toggle('selected', sibling === button); sibling.setAttribute('aria-pressed', String(sibling === button)); } update(); };
+  $(id).onclick = async event => {
+    const button = event.target.closest(`button[data-${attribute}]`);
+    if (!button) return;
+    state[attribute] = button.dataset[attribute];
+    for (const sibling of $(id).querySelectorAll('button')) {
+      sibling.classList.toggle('selected', sibling === button);
+      sibling.setAttribute('aria-pressed', String(sibling === button));
+    }
+    if (!state.user) {
+      await loginDemo(false);
+    } else {
+      update();
+    }
+  };
 }
-$('refreshLooks').onclick = () => state.user ? loadLooks() : openAuth(); $('loadMore').onclick = () => loadWardrobe(true);
-$('locationButton').onclick = () => {
-  if (!state.user) { openAuth(); return; } if (!navigator.geolocation) { toast('Location is not available in this browser.'); return; }
-  const session = state.session; $('locationButton').disabled = true;
-  navigator.geolocation.getCurrentPosition(position => { $('locationButton').disabled = false; if (session !== state.session) return; state.coords = { lat: position.coords.latitude, lon: position.coords.longitude }; loadLooks(); }, () => { $('locationButton').disabled = false; toast('Location was not shared. You can continue with the default forecast.'); }, { timeout: 12000, maximumAge: 300000 });
+$('refreshLooks').onclick = async () => {
+  if (!state.user) {
+    await loginDemo(false);
+  } else {
+    loadLooks();
+  }
+};
+$('loadMore').onclick = () => loadWardrobe(true);
+$('locationButton').onclick = async () => {
+  if (!state.user) {
+    const ok = await loginDemo(false);
+    if (!ok) { openAuth(); return; }
+  }
+  if (!navigator.geolocation) {
+    toast('Location is not available in this browser.');
+    return;
+  }
+  const session = state.session;
+  $('locationButton').disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    position => {
+      $('locationButton').disabled = false;
+      if (session !== state.session) return;
+      state.coords = { lat: position.coords.latitude, lon: position.coords.longitude };
+      loadLooks();
+    },
+    () => {
+      $('locationButton').disabled = false;
+      toast('Location was not shared. You can continue with the default forecast.');
+    },
+    { timeout: 12000, maximumAge: 300000 }
+  );
 };
 $('photoInput').onchange = event => upload(event.target.files[0]);
-for (const type of ['dragover','dragleave','drop']) $('dropZone').addEventListener(type, event => { event.preventDefault(); $('dropZone').classList.toggle('dragging', type === 'dragover'); if (type === 'drop') upload(event.dataTransfer.files[0]); });
+for (const type of ['dragover','dragleave','drop']) $('dropZone').addEventListener(type, event => {
+  event.preventDefault();
+  $('dropZone').classList.toggle('dragging', type === 'dragover');
+  if (type === 'drop') upload(event.dataTransfer.files[0]);
+});
 $('brandFilm').addEventListener('play', () => { $('brandFilm').parentElement.classList.add('playing'); });
-$('watchButton').onclick = async () => { $('brandFilm').scrollIntoView({ block: 'center' }); try { await $('brandFilm').play(); } catch { toast('Use the video controls to play the story.'); } };
+$('watchButton').onclick = async () => {
+  const film = $('brandFilm');
+  film.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  try {
+    await film.play();
+  } catch (error) {
+    try {
+      film.muted = true;
+      await film.play();
+      toast('Playing brand film (muted). Unmute anytime via player controls.');
+    } catch {
+      toast('Use the video controls to play the story.');
+    }
+  }
+};
 resetAccount();
-(async () => { try { await api.renew(); await loadProfile(); await Promise.all([loadWardrobe(), loadLooks()]); } catch (error) { if (![401,403].includes(error.status)) toast('Session could not be restored. You can sign in to try again.'); } })();
+(async () => {
+  try {
+    await api.renew();
+    await loadProfile();
+    await Promise.all([loadWardrobe(), loadLooks()]);
+  } catch (error) {
+    await loginDemo(false);
+  }
+})();

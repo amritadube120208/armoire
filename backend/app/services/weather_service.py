@@ -34,23 +34,44 @@ def _make_cache_key(lat: float, lon: float) -> str:
     return f"weather:{lat:.2f}:{lon:.2f}"
 
 
+_redis_instance = None
+_redis_checked = False
+
+
 def _get_redis() -> Optional[Any]:
     """
-    Lazily attempt to import and connect to Redis.
+    Lazily attempt to import and connect to Redis with fast availability check and memoization.
     Returns None (no error) if redis-py is not installed or Redis is unreachable.
     """
+    global _redis_instance, _redis_checked
+    if _redis_checked:
+        return _redis_instance
+    _redis_checked = True
+
+    import socket
+    try:
+        host = "127.0.0.1" if settings.REDIS_HOST in ("localhost", "127.0.0.1") else settings.REDIS_HOST
+        with socket.create_connection((host, settings.REDIS_PORT), timeout=0.08):
+            pass
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        _redis_instance = None
+        return None
+
     try:
         import redis as redis_lib
         r = redis_lib.Redis(
             host=settings.REDIS_HOST,
             port=settings.REDIS_PORT,
             db=settings.REDIS_DB,
-            socket_connect_timeout=1,
+            socket_connect_timeout=0.5,
+            socket_timeout=0.5,
             decode_responses=True,
         )
         r.ping()
+        _redis_instance = r
         return r
     except Exception:
+        _redis_instance = None
         return None
 
 

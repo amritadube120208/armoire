@@ -74,6 +74,30 @@ SyncSessionLocal = sessionmaker(
     autoflush=False
 )
 
+from sqlalchemy import event
+
+if "sqlite" in settings.DATABASE_URL:
+    @event.listens_for(async_engine.sync_engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=10000")
+            cursor.close()
+        except Exception:
+            pass
+
+if "sqlite" in settings.SYNC_DATABASE_URL:
+    @event.listens_for(sync_engine, "connect")
+    def set_sync_sqlite_pragma(dbapi_connection, connection_record):
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=10000")
+            cursor.close()
+        except Exception:
+            pass
+
 
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
