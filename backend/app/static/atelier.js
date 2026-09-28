@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = { user: null, occasion: 'casual', category: '', items: [], total: 0, coords: null, mode: 'login', wardrobeVersion: 0, looksVersion: 0, session: 0, uploading: false, chatHistory: [], chatSending: false };
+const state = { user: null, occasion: 'casual', category: '', items: [], total: 0, coords: null, mode: 'login', wardrobeVersion: 0, looksVersion: 0, session: 0, uploading: false, chatHistory: [], chatSending: false, wishlist: new Set(['seen_1', 'seen_2', 'seen_3', 'seen_4']) };
 const api = createArmoireAPI({ onExpired: () => { if (state.user) { resetAccount(); toast('Please sign in to continue.'); } } });
 // Remove the previous frontend's persisted demo token without reading it.
 try { localStorage.removeItem('sw_token'); } catch { /* Storage may be disabled. */ }
@@ -83,6 +83,7 @@ async function loadWardrobe(append = false) {
     const data = await api.request(`/wardrobe/items?${query}`); if (version !== state.wardrobeVersion) return;
     state.items = append ? [...state.items, ...data.items] : data.items; state.total = data.total;
     $('pieceCount').textContent = `${data.total} ${data.total === 1 ? 'piece' : 'pieces'}`;
+    if ($('wardrobeCount')) $('wardrobeCount').textContent = data.total;
     $('loadMore').hidden = state.items.length >= data.total; renderWardrobe();
   } catch (error) { if (version === state.wardrobeVersion) empty('wardrobeGrid', 'Your wardrobe will be right back.', errorMessage(error), 'Try again', () => loadWardrobe()); }
   finally { if (version === state.wardrobeVersion) $('loadMore').disabled = false; }
@@ -310,22 +311,113 @@ for (const type of ['dragover','dragleave','drop']) $('dropZone').addEventListen
   $('dropZone').classList.toggle('dragging', type === 'dragover');
   if (type === 'drop') upload(event.dataTransfer.files[0]);
 });
-$('brandFilm').addEventListener('play', () => { $('brandFilm').parentElement.classList.add('playing'); });
-$('watchButton').onclick = async () => {
-  const film = $('brandFilm');
-  film.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  try {
-    await film.play();
-  } catch (error) {
-    try {
-      film.muted = true;
-      await film.play();
-      toast('Playing brand film (muted). Unmute anytime via player controls.');
-    } catch {
-      toast('Use the video controls to play the story.');
+const editorialHero = document.querySelector('.editorial-hero');
+const brandFilm = $('brandFilm');
+if (brandFilm && editorialHero) {
+  brandFilm.addEventListener('play', () => editorialHero.classList.add('is-playing'));
+  brandFilm.addEventListener('pause', () => editorialHero.classList.remove('is-playing'));
+  brandFilm.addEventListener('ended', () => editorialHero.classList.remove('is-playing'));
+}
+if ($('watchButton')) {
+  $('watchButton').onclick = async () => {
+    if (!brandFilm) return;
+    const btnText = $('watchButton').querySelector('.btn-text');
+    if (brandFilm.paused) {
+      try {
+        await brandFilm.play();
+        if (btnText) btnText.textContent = 'Pause Film';
+      } catch {
+        try {
+          brandFilm.muted = true;
+          await brandFilm.play();
+          if (btnText) btnText.textContent = 'Pause Film';
+          toast('Playing brand film (muted).');
+        } catch {
+          toast('Video playback not supported.');
+        }
+      }
+    } else {
+      brandFilm.pause();
+      if (btnText) btnText.textContent = 'Watch Film';
     }
-  }
-};
+  };
+}
+
+// Luxury Navigation & Drawer
+if ($('menuButton')) {
+  $('menuButton').onclick = () => {
+    const drawer = $('atelierDrawer');
+    if (drawer && !drawer.open) drawer.showModal();
+  };
+}
+document.querySelectorAll('[data-close-drawer]').forEach(link => {
+  link.addEventListener('click', () => {
+    const drawer = $('atelierDrawer');
+    if (drawer && drawer.open) drawer.close();
+  });
+});
+if ($('historyButton')) {
+  $('historyButton').onclick = () => {
+    $('looks').scrollIntoView({ behavior: 'smooth' });
+  };
+}
+if ($('bagButton')) {
+  $('bagButton').onclick = () => {
+    $('wardrobe').scrollIntoView({ behavior: 'smooth' });
+  };
+}
+if ($('wishlistButton')) {
+  $('wishlistButton').onclick = () => {
+    toast(`You have ${state.wishlist.size} pieces saved to your wishlist.`);
+  };
+}
+
+// "Seen in this video" product interactions
+document.querySelectorAll('.product-fav-btn').forEach(btn => {
+  btn.onclick = event => {
+    event.stopPropagation();
+    const card = btn.closest('.seen-item-card');
+    const id = card?.dataset.itemId;
+    if (!id) return;
+    if (state.wishlist.has(id)) {
+      state.wishlist.delete(id);
+      btn.classList.remove('favorited');
+      toast('Removed from wishlist.');
+    } else {
+      state.wishlist.add(id);
+      btn.classList.add('favorited');
+      toast(`Saved ${card.dataset.name} to wishlist.`);
+    }
+    if ($('wishlistCount')) $('wishlistCount').textContent = state.wishlist.size;
+  };
+});
+
+document.querySelectorAll('.seen-item-card').forEach(card => {
+  card.onclick = () => {
+    const name = card.dataset.name;
+    const price = card.dataset.price;
+    const category = card.dataset.category;
+    const img = card.dataset.img;
+    const prompt = card.dataset.prompt;
+
+    if ($('quickViewTitle')) $('quickViewTitle').textContent = name;
+    if ($('quickViewPrice')) $('quickViewPrice').textContent = price;
+    if ($('quickViewCategory')) $('quickViewCategory').textContent = category;
+    if ($('quickViewImg')) $('quickViewImg').src = img;
+
+    if ($('askStylistAboutPieceBtn')) {
+      $('askStylistAboutPieceBtn').onclick = () => {
+        const dlg = $('quickViewDialog');
+        if (dlg && dlg.open) dlg.close();
+        $('stylist').scrollIntoView({ behavior: 'smooth' });
+        sendChatMessage(prompt);
+      };
+    }
+
+    const dlg = $('quickViewDialog');
+    if (dlg && !dlg.open) dlg.showModal();
+  };
+});
 
 function appendChatMessage(role, text) {
   const container = $('chatMessages');
