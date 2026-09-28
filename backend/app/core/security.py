@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Union
+import uuid
 import bcrypt
 from jose import JWTError, jwt
 from app.core.config import settings
@@ -45,7 +46,9 @@ def create_access_token(
 
 def create_refresh_token(
     subject: Union[str, Any],
-    expires_delta: Optional[timedelta] = None
+    expires_delta: Optional[timedelta] = None,
+    jti: Optional[str] = None,
+    family: Optional[Union[str, uuid.UUID]] = None
 ) -> str:
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
@@ -53,9 +56,13 @@ def create_refresh_token(
         expire = datetime.now(timezone.utc) + timedelta(
             days=settings.REFRESH_TOKEN_EXPIRE_DAYS
         )
+    token_jti = str(jti or uuid.uuid4())
+    token_family = str(family or uuid.uuid4())
     to_encode: Dict[str, Any] = {
         "exp": expire,
         "sub": str(subject),
+        "jti": token_jti,
+        "family": token_family,
         "type": "refresh"
     }
     encoded_jwt = jwt.encode(

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class UserPreferenceSchema(BaseModel):
@@ -17,6 +17,13 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8, description="Minimum 8 characters")
     name: Optional[str] = Field(None, max_length=100)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_byte_length(cls, v: str) -> str:
+        if len(v.encode("utf-8")) > 72:
+            raise ValueError("Password cannot exceed 72 bytes.")
+        return v
 
 
 class LoginRequest(BaseModel):

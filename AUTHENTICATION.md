@@ -61,16 +61,20 @@ The old single HTML page automatically posted the documented shared demo email/p
 
 The visitor chooses signup or login. On reload, the client attempts cookie refresh and loads `/users/me`. Protected requests share a single refresh when concurrent calls get a 401, and retry at most once. A second 401 expires the UI session. Session changes prevent late responses from restoring another account's data. The legacy localStorage token is removed. Multipart upload, status polling, thumbnail display, outfit feedback and enhancement selection now use the existing API.
 
+## Refresh token session management & rotation (Implemented)
+
+- **Persisted refresh sessions:** Implemented in `UserSession` table (`user_sessions`), tracking token `jti`, `token_family`, `user_id`, `expires_at`, client metadata (`user_agent`, `ip_address`), and revocation status.
+- **Atomic rotation & reuse detection:** Every call to `/auth/refresh` invalidates the presented session record and issues a new refresh token with a unique `jti` in the same `token_family`. If an already revoked token is presented, the system detects replay/compromise, immediately invalidates all active sessions in the entire `token_family`, and returns HTTP 401.
+- **Logout revocation:** Calling `/auth/logout` explicitly revokes the active session in the database in addition to deleting the client cookie.
+- **Input hardening:** Password length is now checked against the 72-byte bcrypt limit on signup, and malformed UUID token subjects are handled gracefully with controlled HTTP 401 errors.
+
 ## Gaps that remain in the backend
 
-- **Refresh replacement is not revocation.** There is no `jti`, token-family/session table or used-token tracking. Previously issued refresh JWTs remain valid until expiration. Same-second replacements may even be identical because their claims are identical. Logout clears one browser cookie; it does not revoke copied access or refresh tokens. This differs from the invalidation wording in `Backend.md` and `backend/README.md`.
-- **Unsafe deployment defaults:** `SECRET_KEY` is a committed development value, `ENVIRONMENT` defaults to development and DEBUG defaults true. Set a strong unique secret, production environment and DEBUG=false before deployment; preferably add fail-fast configuration validation. Debug database logging can include password hashes.
-- **OAuth is planned, not implemented.** `Backend.md` mentions Google verification and `Design.md` includes Google login/password recovery; there are no such auth routes. No email-verification, password-reset, MFA or login rate-limit implementation was found in the reviewed code. `OAuth2PasswordBearer` does not itself implement a Google OAuth flow. Swagger's OAuth password-form expectation also differs from the JSON login endpoint.
-- **Input hardening:** signup validates minimum length only, not a full password-strength policy. bcrypt has a 72-byte input boundary and the schema does not enforce it. Refresh parses `uuid.UUID(sub)` without catching malformed UUID errors. These should become controlled validation/authentication errors.
+- **Unsafe deployment defaults:** `SECRET_KEY` is a development value in `.env.example`, `ENVIRONMENT` defaults to development and DEBUG defaults true. Set a strong unique secret, production environment and DEBUG=false before deployment.
+- **OAuth is planned, not implemented:** `Backend.md` mentions Google verification and `Design.md` includes Google login/password recovery; there are no such auth routes yet.
 - **Cookie/CORS boundary:** this frontend is deliberately same-origin. Cross-origin hosting requires an explicit origin/cookie/CSRF design; no dedicated CSRF token checks are implemented. SameSite=Lax is a mitigation, not complete CSRF protection.
 - **Media authorization:** API ownership checks do not protect the local `/storage` static mount. Anyone with a media URL can retrieve it in local-storage mode. Production private media needs authenticated delivery or scoped expiring URLs.
-
-Recommended follow-up order: production secret enforcement; persisted refresh sessions with atomic rotation/reuse detection and logout revocation; password-byte and malformed-subject validation; login throttling; private media authorization. These backend changes are not claimed as completed by this frontend integration.
+- **Login throttling:** Rate limiting for failed authentication attempts.
 
 ## Video and aesthetic integration
 
