@@ -36,6 +36,7 @@ def _make_cache_key(lat: float, lon: float) -> str:
 
 _redis_instance = None
 _redis_checked = False
+_memory_cache: Dict[str, Tuple[datetime, Dict[str, Any]]] = {}
 
 
 def _get_redis() -> Optional[Any]:
@@ -114,12 +115,11 @@ class WeatherService:
         if cached:
             return cached
 
-        # 2. Recent DB snapshot
-        db_snapshot = await self._get_recent_db_snapshot(lat, lon)
-        if db_snapshot:
-            result = self._snapshot_to_dict(db_snapshot)
-            self._write_cache(cache_key, result)
-            return result
+        # 2. Coordinate-specific in-memory cache (TTL: 10 minutes)
+        if cache_key in _memory_cache:
+            cached_time, cached_val = _memory_cache[cache_key]
+            if (datetime.now(timezone.utc) - cached_time).total_seconds() < 600:
+                return cached_val
 
         # 3. Live fetch
         try:
@@ -138,6 +138,7 @@ class WeatherService:
             result["notice"] = conditions["notice"]
 
         self._write_cache(cache_key, result)
+        _memory_cache[cache_key] = (datetime.now(timezone.utc), result)
         return result
 
     async def get_snapshot_by_id(self, snapshot_id: str) -> Optional[WeatherSnapshot]:

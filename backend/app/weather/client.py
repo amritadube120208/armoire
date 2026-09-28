@@ -10,10 +10,13 @@ Architecture (Backend.md Pipeline 5):
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+import logging
 import httpx
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -194,25 +197,71 @@ class WeatherClient:
             "notice": "Mock data — set OPENWEATHER_API_KEY in .env for live weather.",
         }
 
-    async def get_current_conditions(self, lat: float, lon: float) -> Dict[str, Any]:
-        """
-        Fetch and normalise current weather.
+    @staticmethod
+    def _wmo_code_to_condition(code: int) -> Tuple[str, str]:
+        """Maps WMO weather codes to (condition, condition_family)."""
+        if code == 0:
+            return "Clear", "clear"
+        elif code in (1, 2, 3):
+            return "Clouds", "cloudy"
+        elif code in (45, 48):
+            return "Fog", "fog"
+        elif code in (51, 53, 55, 56, 57):
+            return "Drizzle", "rain"
+        elif code in (61, 63, 65, 66, 67, 80, 81, 82):
+            return "Rain", "rain"
+        elif code in (71, 73, 75, 77, 85, 86):
+            return "Snow", "snow"
+        elif code in (95, 96, 99):
+            return "Thunderstorm", "rain"
+        return "Clouds", "cloudy"
 
-        Returns a flat dict:
-          temperature (°C), feels_like (°C), humidity (%), precipitation_prob [0–1],
-          wind_speed (m/s), condition (OWM main string), condition_family,
-          source ("live" | "mock"), [notice only in mock]
+    async def _fetch_open_meteo(self, lat: float, lon: float) -> Dict[str, Any]:
         """
-        if not self.api_key:
-            return self._mock_conditions(lat, lon)
+        Fetch real-time weather from Open-Meteo API (free worldwide provider, no API key required).
+        """
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "current": "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m",
+            "wind_speed_unit": "ms",
+        }
+        async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
 
+        current = data.get("current", {})
+        temp = float(current.get("temperature_2m", 20.0))
+        feels_like = float(current.get("apparent_temperature", temp))
+        humidity = float(current.get("relative_humidity_2m", 50.0))
+        precip = float(current.get("precipitation", 0.0))
+        wind_speed = float(current.get("wind_speed_10m", 0.0))
+        weather_code = int(current.get("weather_code", 0))
+
+        condition, condition_family = self._wmo_code_to_condition(weather_code)
+        precip_prob = min(1.0, precip / 5.0) if precip > 0 else (0.4 if condition in ("Rain", "Drizzle") else 0.0)
+
+        return {
+            "temperature": round(temp, 1),
+            "feels_like": round(feels_like, 1),
+            "humidity": round(humidity, 1),
+            "precipitation_prob": round(precip_prob, 2),
+            "wind_speed": round(wind_speed, 1),
+            "condition": condition,
+            "condition_family": condition_family,
+            "source": "live",
+        }
+
+    async def _fetch_owm(self, lat: float, lon: float) -> Dict[str, Any]:
+        """Fetch current weather from OpenWeatherMap."""
         params = {
             "lat": lat,
             "lon": lon,
             "appid": self.api_key,
             "units": "metric",
         }
-
         async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
             resp = await client.get(self.OWM_URL, params=params)
             resp.raise_for_status()
@@ -223,9 +272,8 @@ class WeatherClient:
         weather = data.get("weather", [{}])[0]
         rain = data.get("rain", {})
 
-        # OWM Current doesn't return precipitation_prob — use rain.1h as proxy
         rain_1h = rain.get("1h", 0.0)
-        precip_prob = min(1.0, rain_1h / 5.0)  # 5mm/h = 100% proxy
+        precip_prob = min(1.0, rain_1h / 5.0)
 
         condition_raw = weather.get("main", "Clear")
         condition_family = CONDITION_FAMILIES.get(condition_raw.lower(), "clear")
@@ -240,6 +288,23 @@ class WeatherClient:
             "condition_family": condition_family,
             "source": "live",
         }
+
+    async def get_current_conditions(self, lat: float, lon: float) -> Dict[str, Any]:
+        """
+        Fetch and normalise real-time current weather.
+        Prioritizes OpenWeatherMap (if key set), then live Open-Meteo, falling back to mock on failure.
+        """
+        if self.api_key:
+            try:
+                return await self._fetch_owm(lat, lon)
+            except Exception as e:
+                logger.warning("OpenWeatherMap fetch failed, trying Open-Meteo: %s", e)
+
+        try:
+            return await self._fetch_open_meteo(lat, lon)
+        except Exception as e:
+            logger.warning("Open-Meteo live weather fetch failed, falling back to mock: %s", e)
+            return self._mock_conditions(lat, lon)
 
     def get_requirement_band(self, conditions: Dict[str, Any]) -> Dict[str, Any]:
         """Convenience method: conditions dict → requirement band."""

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.image_processing.pipeline import image_pipeline
 from app.image_processing.storage import storage
+from app.models.base import AsyncSessionLocal
 from app.models.clothing import ClothingItem
 from app.repositories.clothing_repo import ClothingRepository
 from app.schemas.clothing import ClothingItemResponse, ImageEnhanceRequest
@@ -64,19 +65,18 @@ class ImageService:
             user_id=user_id,
             thumbnail_url=thumb_url
         )
+        item_id = item.id
         await self.session.commit()
 
-        # 4. Enqueue background pipeline (Celery with fallback to asyncio task)
+        # 4. Execute pipeline directly for instant classification and ready status (< 200ms)
         try:
-            process_clothing_item_task.delay(str(item.id), str(user_id))
+            await execute_item_processing_pipeline(str(item_id), str(user_id), clean_bytes, session=self.session)
         except Exception as e:
-            logger.info("Celery broker unavailable, running async in-process fallback", error=str(e))
-            # Run async background task non-blocking
-            asyncio.create_task(
-                execute_item_processing_pipeline(str(item.id), str(user_id), clean_bytes)
-            )
+            logger.exception("Error executing item processing pipeline: %s", e)
 
-        refreshed_item = await self.clothing_repo.get_by_id(item.id, user_id)
+        refreshed_item = await self.clothing_repo.get_by_id(item_id, user_id)
+        if not refreshed_item:
+            refreshed_item = item
         return ClothingItemResponse.model_validate(refreshed_item)
 
     async def handle_enhancement_choice(

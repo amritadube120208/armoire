@@ -110,8 +110,9 @@ async function loadLooks() {
 function renderWeather(weather, defaultLocation = false) {
   if (!weather) return;
   $('weatherTemperature').textContent = Number.isFinite(weather.temperature) ? `${Math.round(weather.temperature)}°C` : 'Forecast unavailable';
-  const source = weather.source === 'mock' ? 'Sample forecast' : weather.source === 'live' ? 'Live forecast' : 'Cached forecast · source unverified';
-  $('weatherDescription').textContent = `${source} · ${weather.condition || 'Conditions unavailable'} · ${defaultLocation ? 'Default location (New Delhi)' : 'Your selected location'}`;
+  const source = weather.source === 'live' ? 'Live real-time forecast' : (weather.source === 'mock' ? 'Sample forecast' : 'Cached forecast');
+  const locationLabel = defaultLocation ? 'Default location (New Delhi)' : 'Your location';
+  $('weatherDescription').textContent = `${source} · ${weather.condition || 'Conditions unavailable'} · ${locationLabel}`;
   const band = weather.requirement_band || {};
   $('weatherLayers').textContent = band.required_layers?.length ? `Bring a little comfort: ${band.required_layers.join(', ')}.` : 'Keep it light. A breathable base is a good place to start.';
 }
@@ -155,19 +156,32 @@ async function upload(file) {
   if (!['image/jpeg','image/png','image/webp'].includes(file.type)) { $('uploadStatus').textContent = 'Please choose a JPG, PNG or WEBP photo.'; return; }
   if (file.size > 15*1024*1024 || !file.size) { $('uploadStatus').textContent = 'Choose a photo between 1 byte and 15 MB.'; return; }
   const session = state.session; state.uploading = true; $('photoInput').disabled = true; $('uploadReview').hidden = true;
-  $('uploadStatus').textContent = 'Uploading your piece and checking the photo…';
+  $('uploadStatus').textContent = 'Analyzing and adding piece to wardrobe…';
   try {
     const form = new FormData(); form.append('file', file);
     let item = await api.request('/wardrobe/items', { method: 'POST', body: form }); if (session !== state.session) return;
-    $('uploadStatus').textContent = 'Photo received. Discovering the details…'; await loadWardrobe();
-    for (let attempt=0; item.status === 'processing' && attempt<15; attempt++) {
-      await new Promise(resolve => setTimeout(resolve, 2000)); if (session !== state.session) return;
+    
+    // Fast polling fallback if item is still in processing state
+    for (let attempt=0; item.status === 'processing' && attempt<10; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 300)); if (session !== state.session) return;
       const status = await api.request(`/wardrobe/items/${encodeURIComponent(item.id)}/status`); if (session !== state.session) return;
-      if (status.status !== 'processing') item = await api.request(`/wardrobe/items/${encodeURIComponent(item.id)}`);
+      if (status.status !== 'processing') {
+        item = await api.request(`/wardrobe/items/${encodeURIComponent(item.id)}`);
+        break;
+      }
     }
     if (session !== state.session) return;
-    $('uploadStatus').textContent = item.status === 'ready' ? 'Your piece is ready. A new possibility for tomorrow.' : item.status === 'needs_review' ? 'Your photo needs a closer look. Try a clearer photo or review the available images below.' : 'Your photo is saved and still processing. Refresh your wardrobe shortly.';
-    renderUploadReview(item); await Promise.all([loadWardrobe(), loadLooks()]);
+    if (item.status === 'ready') {
+      $('uploadStatus').textContent = 'Your piece is ready. Added to your wardrobe.';
+      toast('Your piece is ready and in your wardrobe!');
+    } else if (item.status === 'needs_review') {
+      $('uploadStatus').textContent = 'Your photo needs a closer look. Review the available images below.';
+      toast('Piece uploaded. Quality review suggested.');
+    } else {
+      $('uploadStatus').textContent = 'Your piece is processing in the background.';
+    }
+    renderUploadReview(item);
+    await Promise.all([loadWardrobe(), loadLooks()]);
   } catch (error) { if (session === state.session) $('uploadStatus').textContent = errorMessage(error); }
   finally { state.uploading = false; $('photoInput').disabled = false; $('photoInput').value = ''; }
 }
@@ -252,18 +266,24 @@ $('locationButton').onclick = async () => {
   }
   const session = state.session;
   $('locationButton').disabled = true;
+  $('weatherDescription').textContent = 'Acquiring real-time location…';
   navigator.geolocation.getCurrentPosition(
     position => {
       $('locationButton').disabled = false;
       if (session !== state.session) return;
-      state.coords = { lat: position.coords.latitude, lon: position.coords.longitude };
+      state.coords = {
+        lat: Number(position.coords.latitude.toFixed(4)),
+        lon: Number(position.coords.longitude.toFixed(4))
+      };
+      toast('Live location acquired. Refreshing forecast…');
       loadLooks();
     },
     () => {
       $('locationButton').disabled = false;
-      toast('Location was not shared. You can continue with the default forecast.');
+      toast('Location permission not granted. Using default forecast.');
+      loadLooks();
     },
-    { timeout: 12000, maximumAge: 300000 }
+    { timeout: 10000, maximumAge: 60000 }
   );
 };
 $('photoInput').onchange = event => upload(event.target.files[0]);
@@ -290,6 +310,19 @@ $('watchButton').onclick = async () => {
 };
 resetAccount();
 (async () => {
+  if (navigator.geolocation && !state.coords) {
+    navigator.geolocation.getCurrentPosition(
+      position => {
+        state.coords = {
+          lat: Number(position.coords.latitude.toFixed(4)),
+          lon: Number(position.coords.longitude.toFixed(4))
+        };
+        if (state.user) loadLooks();
+      },
+      () => {},
+      { timeout: 6000, maximumAge: 300000 }
+    );
+  }
   try {
     await api.renew();
     await loadProfile();
