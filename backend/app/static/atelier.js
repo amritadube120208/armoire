@@ -237,6 +237,7 @@ $('accountButton').onclick = () => {
 };
 if ($('demoButton')) $('demoButton').onclick = () => loginDemo(true);
 if ($('quickDemoBtn')) $('quickDemoBtn').onclick = () => loginDemo(true);
+if ($('quickDemoBtn2')) $('quickDemoBtn2').onclick = () => loginDemo(true);
 $('authToggle').onclick = () => { state.mode = state.mode === 'login' ? 'signup' : 'login'; authMode(); };
 $('authDialog').addEventListener('close', () => { $('passwordInput').value = ''; });
 $('authForm').onsubmit = async event => {
