@@ -216,6 +216,73 @@ class WeatherClient:
             return "Thunderstorm", "rain"
         return "Clouds", "cloudy"
 
+    _GEOCODE_CACHE: Dict[Tuple[float, float], Tuple[str, str]] = {}
+
+    async def reverse_geocode(self, lat: float, lon: float) -> Tuple[str, str]:
+        """
+        Reverse geocodes coordinates into (city, country) with in-memory caching.
+        """
+        cache_key = (round(lat, 2), round(lon, 2))
+        if cache_key in self._GEOCODE_CACHE:
+            return self._GEOCODE_CACHE[cache_key]
+
+        # 1. Try OpenStreetMap Nominatim reverse geocode
+        try:
+            url = "https://nominatim.openstreetmap.org/reverse"
+            headers = {"User-Agent": "ArmoireSmartWardrobe/1.0"}
+            params = {"lat": lat, "lon": lon, "format": "json"}
+            async with httpx.AsyncClient(timeout=4.0, headers=headers) as client:
+                resp = await client.get(url, params=params)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    addr = data.get("address", {})
+                    city = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("municipality") or addr.get("state_district") or addr.get("county") or "Local Area"
+                    country = addr.get("country", "")
+                    self._GEOCODE_CACHE[cache_key] = (city, country)
+                    return city, country
+        except Exception as e:
+            logger.debug("Nominatim reverse geocode error: %s", e)
+
+        # 2. Known fallback coordinates
+        if abs(lat - 28.6) < 1.0 and abs(lon - 77.2) < 1.0:
+            return "New Delhi", "India"
+        if abs(lat - 19.07) < 1.0 and abs(lon - 72.87) < 1.0:
+            return "Mumbai", "India"
+        if abs(lat - 40.71) < 1.0 and abs(lon - -74.0) < 1.0:
+            return "New York", "USA"
+        if abs(lat - 51.5) < 1.0 and abs(lon - -0.12) < 1.0:
+            return "London", "UK"
+
+        return f"{lat:.2f}, {lon:.2f}", ""
+
+    async def search_city(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Search cities by name using Open-Meteo Geocoding API (free worldwide).
+        """
+        if not query or len(query.strip()) < 2:
+            return []
+        try:
+            url = "https://geocoding-api.open-meteo.com/v1/search"
+            params = {"name": query.strip(), "count": 5, "language": "en", "format": "json"}
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(url, params=params)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    results = []
+                    for r in data.get("results", []):
+                        results.append({
+                            "name": r.get("name"),
+                            "country": r.get("country", ""),
+                            "country_code": r.get("country_code", ""),
+                            "admin1": r.get("admin1", ""),
+                            "latitude": float(r.get("latitude")),
+                            "longitude": float(r.get("longitude")),
+                        })
+                    return results
+        except Exception as e:
+            logger.warning("City search error: %s", e)
+        return []
+
     async def _fetch_open_meteo(self, lat: float, lon: float) -> Dict[str, Any]:
         """
         Fetch real-time weather from Open-Meteo API (free worldwide provider, no API key required).
@@ -242,6 +309,7 @@ class WeatherClient:
 
         condition, condition_family = self._wmo_code_to_condition(weather_code)
         precip_prob = min(1.0, precip / 5.0) if precip > 0 else (0.4 if condition in ("Rain", "Drizzle") else 0.0)
+        city_name, country_name = await self.reverse_geocode(lat, lon)
 
         return {
             "temperature": round(temp, 1),
@@ -251,6 +319,8 @@ class WeatherClient:
             "wind_speed": round(wind_speed, 1),
             "condition": condition,
             "condition_family": condition_family,
+            "city": city_name,
+            "country": country_name,
             "source": "live",
         }
 

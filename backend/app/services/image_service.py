@@ -28,15 +28,18 @@ class ImageService:
         self,
         user_id: uuid.UUID,
         raw_bytes: bytes,
-        filename: str = "upload.jpg"
+        filename: str = "upload.jpg",
+        category: Optional[str] = None,
+        subtype: Optional[str] = None,
+        name: Optional[str] = None
     ) -> ClothingItemResponse:
         """
         Executes upload ingestion per Backend.md Pipeline 2:
           1. Validation (MIME + magic bytes + size limit)
           2. Re-encode server-side (strips EXIF/GPS, neutralizes payloads)
           3. Save original and thumbnail to object storage
-          4. Create DB item stub in 'processing' status
-          5. Enqueue background processing job
+          4. Create DB item stub with unique UUID in 'processing' status
+          5. Enqueue background processing job with user & filename hints
         """
         # 1 & 2. Process, strip EXIF, and evaluate quality
         clean_bytes, thumb_bytes, quality_metrics = image_pipeline.process_and_reencode(raw_bytes)
@@ -49,12 +52,14 @@ class ImageService:
         orig_url = await storage.save_file(orig_key, clean_bytes)
         thumb_url = await storage.save_file(thumb_key, thumb_bytes)
 
-        # 3. Create initial item row in DB
+        # 3. Create initial item row in DB with independent UUID
         initial_status = "needs_review" if quality_metrics.quality_band == "poor" else "processing"
 
         item = await self.clothing_repo.create_item(
             user_id=user_id,
             original_url=orig_url,
+            category=category.lower().strip() if category else None,
+            subtype=subtype.lower().strip() if subtype else (name.lower().strip() if name else None),
             status=initial_status,
             quality_band=quality_metrics.quality_band,
             quality_metrics=quality_metrics.model_dump()
@@ -70,7 +75,15 @@ class ImageService:
 
         # 4. Execute pipeline directly for instant classification and ready status (< 200ms)
         try:
-            await execute_item_processing_pipeline(str(item_id), str(user_id), clean_bytes, session=self.session)
+            await execute_item_processing_pipeline(
+                str(item_id),
+                str(user_id),
+                clean_bytes,
+                session=self.session,
+                category_hint=category,
+                subtype_hint=subtype or name,
+                filename=filename,
+            )
         except Exception as e:
             logger.exception("Error executing item processing pipeline: %s", e)
 

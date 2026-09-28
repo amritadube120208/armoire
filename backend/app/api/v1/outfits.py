@@ -4,7 +4,7 @@ Belongs to Phase 8 per Upgradation.md.
 """
 import uuid
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.models.base import get_async_db

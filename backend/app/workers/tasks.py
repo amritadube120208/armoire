@@ -64,7 +64,10 @@ async def _process_item_core(
     item_id: uuid.UUID,
     user_id: uuid.UUID,
     raw_image_bytes: Optional[bytes],
-    item_id_str: str
+    item_id_str: str,
+    category_hint: Optional[str] = None,
+    subtype_hint: Optional[str] = None,
+    filename: Optional[str] = None,
 ) -> dict:
     clothing_repo = ClothingRepository(session)
     item = await clothing_repo.get_by_id(item_id, user_id)
@@ -116,7 +119,13 @@ async def _process_item_core(
 
     # 4. Classification
     try:
-        cls_result = await classifier.classify(image_bytes, quality_band=quality_band)
+        cls_result = await classifier.classify(
+            image_bytes,
+            quality_band=quality_band,
+            category_hint=category_hint or item.category,
+            subtype_hint=subtype_hint or item.subtype,
+            filename=filename,
+        )
     except Exception as e:
         logger.error("Classifier failed, falling back to needs_review: %s", str(e))
         cls_result = None
@@ -137,8 +146,8 @@ async def _process_item_core(
     await clothing_repo.update_item_attributes(
         item_id=item_id,
         user_id=user_id,
-        category=cls_result.category if cls_result else "top",
-        subtype=cls_result.subtype if cls_result else None,
+        category=cls_result.category if cls_result else (item.category or "tops"),
+        subtype=cls_result.subtype if cls_result else (item.subtype or "t-shirt"),
         status=final_status,
         color_primary=primary_color,
         color_secondary=secondary_color,
@@ -169,7 +178,10 @@ async def execute_item_processing_pipeline(
     item_id_str: str,
     user_id_str: str,
     raw_image_bytes: Optional[bytes] = None,
-    session: Optional[AsyncSession] = None
+    session: Optional[AsyncSession] = None,
+    category_hint: Optional[str] = None,
+    subtype_hint: Optional[str] = None,
+    filename: Optional[str] = None,
 ) -> dict:
     """
     Core business logic for item processing.
@@ -186,10 +198,16 @@ async def execute_item_processing_pipeline(
     user_id = uuid.UUID(user_id_str)
 
     if session is not None:
-        return await _process_item_core(session, item_id, user_id, raw_image_bytes, item_id_str)
+        return await _process_item_core(
+            session, item_id, user_id, raw_image_bytes, item_id_str,
+            category_hint=category_hint, subtype_hint=subtype_hint, filename=filename
+        )
     else:
         async with AsyncSessionLocal() as sess:
-            return await _process_item_core(sess, item_id, user_id, raw_image_bytes, item_id_str)
+            return await _process_item_core(
+                sess, item_id, user_id, raw_image_bytes, item_id_str,
+                category_hint=category_hint, subtype_hint=subtype_hint, filename=filename
+            )
 
 
 @celery_app.task(name="process_clothing_item_task")

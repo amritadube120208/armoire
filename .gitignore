@@ -19,6 +19,8 @@ htmlcov/
 
 # Databases & local storage
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
 storage_data/*
 !storage_data/.gitkeep

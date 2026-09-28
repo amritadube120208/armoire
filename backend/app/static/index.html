@@ -196,12 +196,45 @@
     </div>
     <div class="edit-layout">
       <aside class="weather-card">
-        <span class="weather-icon" aria-hidden="true">☀</span>
+        <div class="weather-header-row">
+          <span id="weatherIcon" class="weather-icon" aria-hidden="true">☀</span>
+          <div class="weather-city-badge">
+            <span class="geo-pin">📍</span>
+            <strong id="weatherCity">New Delhi, IN</strong>
+          </div>
+        </div>
         <p class="eyebrow">DRESSED FOR THE DAY</p>
         <h3 id="weatherTemperature">A little forecast.<br>A better outfit.</h3>
-        <p id="weatherDescription">Set your location for weather-aware suggestions.</p>
-        <button id="locationButton" class="text-button">Use My Location ↗</button>
+        <p id="weatherDescription">Real-time live forecast</p>
+
+        <div class="weather-metrics-grid">
+          <div class="weather-metric-item">
+            <span class="metric-label">Feels like</span>
+            <strong id="weatherFeelsLike" class="metric-value">--</strong>
+          </div>
+          <div class="weather-metric-item">
+            <span class="metric-label">Rain / Precip</span>
+            <strong id="weatherPrecip" class="metric-value">--</strong>
+          </div>
+          <div class="weather-metric-item">
+            <span class="metric-label">Humidity</span>
+            <strong id="weatherHumidity" class="metric-value">--</strong>
+          </div>
+          <div class="weather-metric-item">
+            <span class="metric-label">Wind</span>
+            <strong id="weatherWind" class="metric-value">--</strong>
+          </div>
+        </div>
+
         <p id="weatherLayers" class="weather-detail">Your location is used only when you choose.</p>
+
+        <div class="weather-controls">
+          <button id="locationButton" class="text-button" type="button">Use My Location ↗</button>
+          <div class="weather-city-search">
+            <input id="citySearchInput" type="text" placeholder="Or search city (e.g. Mumbai, London)…" autocomplete="off" aria-label="City name">
+            <button id="citySearchBtn" type="button" class="button button-outline city-btn" title="Update city forecast">Go ↗</button>
+          </div>
+        </div>
       </aside>
       <div id="looksGrid" class="looks-grid" aria-live="polite"></div>
     </div>
@@ -269,6 +302,23 @@
       </ol>
     </div>
     <div class="upload-card">
+      <div class="studio-meta-bar">
+        <div class="studio-category-select-wrap">
+          <span class="studio-field-label">Category <small>(Optional · AI auto-detects from photo)</small></span>
+          <div id="uploadCategoryTabs" class="editorial-tabs studio-tabs" role="radiogroup">
+            <button type="button" class="editorial-tab selected" data-cat="" aria-pressed="true">Auto-Detect</button>
+            <button type="button" class="editorial-tab" data-cat="tops" aria-pressed="false">Tops</button>
+            <button type="button" class="editorial-tab" data-cat="bottoms" aria-pressed="false">Bottoms</button>
+            <button type="button" class="editorial-tab" data-cat="outerwear" aria-pressed="false">Layers</button>
+            <button type="button" class="editorial-tab" data-cat="dresses" aria-pressed="false">Dresses</button>
+            <button type="button" class="editorial-tab" data-cat="shoes" aria-pressed="false">Shoes</button>
+            <button type="button" class="editorial-tab" data-cat="accessories" aria-pressed="false">Accessories</button>
+          </div>
+        </div>
+        <div class="studio-name-input-wrap">
+          <input id="uploadItemName" type="text" placeholder="Piece name (optional, e.g. White Heavyweight T-Shirt)…" autocomplete="off" maxlength="80">
+        </div>
+      </div>
       <label id="dropZone" for="photoInput" class="drop-zone">
         <span class="upload-symbol" aria-hidden="true">＋</span>
         <h3>A new addition.</h3>

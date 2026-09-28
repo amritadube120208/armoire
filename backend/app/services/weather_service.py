@@ -134,6 +134,8 @@ class WeatherService:
 
         result = self._snapshot_to_dict(snapshot)
         result["source"] = conditions.get("source", "live")
+        result["city"] = conditions.get("city") or "Your Location"
+        result["country"] = conditions.get("country", "")
         if "notice" in conditions:
             result["notice"] = conditions["notice"]
 

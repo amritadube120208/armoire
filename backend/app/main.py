@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.v1 import api_v1_router
 from app.core.config import settings
 from app.core.logging import get_logger, setup_logging
@@ -64,8 +65,8 @@ app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
 
 # Consistent Error Envelope Handlers
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -81,7 +82,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=422,
         content={
             "data": None,
             "error": {
@@ -91,6 +92,22 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             }
         }
     )
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "data": None,
+            "error": {
+                "code": 500,
+                "message": "Internal Server Error"
+            }
+        }
+    )
+
 
 
 @app.get("/", include_in_schema=False)

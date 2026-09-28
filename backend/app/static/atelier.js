@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = { user: null, occasion: 'casual', category: '', items: [], total: 0, coords: null, mode: 'login', wardrobeVersion: 0, looksVersion: 0, session: 0, uploading: false, chatHistory: [], chatSending: false, wishlist: new Set(['seen_1', 'seen_2', 'seen_3', 'seen_4']) };
+const state = { user: null, occasion: 'casual', category: '', items: [], total: 0, coords: null, city: null, mode: 'login', wardrobeVersion: 0, looksVersion: 0, session: 0, uploading: false, chatHistory: [], chatSending: false, wishlist: new Set(['seen_1', 'seen_2', 'seen_3', 'seen_4']) };
 const api = createArmoireAPI({ onExpired: () => { if (state.user) { resetAccount(); toast('Please sign in to continue.'); } } });
 // Remove the previous frontend's persisted demo token without reading it.
 try { localStorage.removeItem('sw_token'); } catch { /* Storage may be disabled. */ }
@@ -88,23 +88,34 @@ async function loadWardrobe(append = false) {
   } catch (error) { if (version === state.wardrobeVersion) empty('wardrobeGrid', 'Your wardrobe will be right back.', errorMessage(error), 'Try again', () => loadWardrobe()); }
   finally { if (version === state.wardrobeVersion) $('loadMore').disabled = false; }
 }
+function formatPieceTitle(str) {
+  if (!str) return 'Piece';
+  return str.split(/[-_ ]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
 function renderWardrobe() {
   if (!state.items.length) { empty('wardrobeGrid', 'A little room for possibility.', state.category ? 'No pieces in this category yet.' : 'Photograph your first piece to start your collection.', 'Add a piece ↗', () => $('studio').scrollIntoView({ behavior: 'smooth' })); return; }
   $('wardrobeGrid').replaceChildren();
   state.items.forEach(item => {
-    const card = document.createElement('article'); card.className = 'garment-card'; const color = item.attributes?.color_primary || ''; const name = item.subtype || item.category || 'New piece';
-    const photo = item.image; card.append(imageNode(photo?.enhancement_applied ? photo.enhanced_url || photo.original_url : photo?.thumbnail_url || photo?.original_url, `${color} ${name}`));
+    const card = document.createElement('article');
+    card.className = 'garment-card';
+    card.dataset.itemId = String(item.id);
+    const color = item.attributes?.color_primary || '';
+    const rawName = item.subtype || item.category || 'piece';
+    const displayName = formatPieceTitle(rawName);
+    const photo = item.image;
+    card.append(imageNode(photo?.enhancement_applied ? photo.enhanced_url || photo.original_url : photo?.thumbnail_url || photo?.original_url, `${color} ${displayName}`));
     const details = document.createElement('div');
-    details.innerHTML = `<h3>${escapeHTML(name)}</h3><p>${escapeHTML(color)}${color ? ' · ' : ''}Worn ${Number(item.wear_count) || 0} times</p><div class="garment-meta"><span class="garment-status">${escapeHTML(item.status === 'ready' ? 'Ready to style' : item.status === 'needs_review' ? 'Needs your review' : 'Processing your photo')}</span><button class="garment-delete" title="Remove piece" aria-label="Remove piece">Remove ✕</button></div>`;
+    details.innerHTML = `<h3>${escapeHTML(displayName)}</h3><p>${escapeHTML(color)}${color ? ' · ' : ''}Worn ${Number(item.wear_count) || 0} times</p><div class="garment-meta"><span class="garment-status">${escapeHTML(item.status === 'ready' ? 'Ready to style' : item.status === 'needs_review' ? 'Needs your review' : 'Processing your photo')}</span><button class="garment-delete" title="Remove piece" aria-label="Remove piece">Remove ✕</button></div>`;
     const deleteBtn = details.querySelector('.garment-delete');
     if (deleteBtn) {
       deleteBtn.onclick = async event => {
         event.stopPropagation();
-        if (confirm(`Remove this ${name} from your wardrobe?`)) {
+        if (confirm(`Remove this ${displayName} from your wardrobe?`)) {
           deleteBtn.disabled = true;
           try {
             await api.request(`/wardrobe/items/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
-            toast(`${name} removed from your wardrobe.`);
+            toast(`${displayName} removed from your wardrobe.`);
             await Promise.all([loadWardrobe(), loadLooks()]);
           } catch (error) {
             toast(errorMessage(error));
@@ -119,19 +130,61 @@ function renderWardrobe() {
 async function loadLooks() {
   if (!state.user) return;
   const version = ++state.looksVersion;
-  const query = new URLSearchParams({ occasion: state.occasion }); if (state.coords) { query.set('lat', state.coords.lat); query.set('lon', state.coords.lon); }
+  const query = new URLSearchParams({ occasion: state.occasion });
+  if (state.city) {
+    query.set('city', state.city);
+  } else if (state.coords) {
+    query.set('lat', state.coords.lat);
+    query.set('lon', state.coords.lon);
+  }
   empty('looksGrid', 'Finding your next favourite…', 'Considering your pieces, your plans, and the day ahead.');
   try {
     const data = await api.request(`/recommendations?${query}`); if (version !== state.looksVersion) return;
-    renderWeather(data.weather, !state.coords); renderLooks(data.recommendations || []);
+    renderWeather(data.weather, !state.coords && !state.city); renderLooks(data.recommendations || []);
   } catch (error) { if (version === state.looksVersion) empty('looksGrid', 'A little pause in the inspiration.', errorMessage(error), 'Try again', loadLooks); }
 }
 function renderWeather(weather, defaultLocation = false) {
   if (!weather) return;
-  $('weatherTemperature').textContent = Number.isFinite(weather.temperature) ? `${Math.round(weather.temperature)}°C` : 'Forecast unavailable';
+  const temp = Number.isFinite(weather.temperature) ? `${Math.round(weather.temperature)}°C` : 'Forecast unavailable';
+  $('weatherTemperature').textContent = temp;
+
+  // City display
+  if ($('weatherCity')) {
+    const city = weather.city || (defaultLocation ? 'New Delhi, IN' : 'Your Location');
+    $('weatherCity').textContent = city;
+  }
+
+  // Weather icon mapping
+  if ($('weatherIcon')) {
+    const condFam = (weather.condition_family || '').toLowerCase();
+    const cond = (weather.condition || '').toLowerCase();
+    let icon = '☀';
+    if (condFam === 'rain' || cond.includes('rain') || cond.includes('drizzle')) icon = '🌧';
+    else if (condFam === 'snow' || cond.includes('snow')) icon = '❄';
+    else if (condFam === 'fog' || cond.includes('fog') || cond.includes('mist')) icon = '🌫';
+    else if (condFam === 'cloudy' || cond.includes('cloud')) icon = '⛅';
+    else if (condFam === 'clear') icon = '☀';
+    $('weatherIcon').textContent = icon;
+  }
+
   const source = weather.source === 'live' ? 'Live real-time forecast' : (weather.source === 'mock' ? 'Sample forecast' : 'Cached forecast');
-  const locationLabel = defaultLocation ? 'Default location (New Delhi)' : 'Your location';
-  $('weatherDescription').textContent = `${source} · ${weather.condition || 'Conditions unavailable'} · ${locationLabel}`;
+  $('weatherDescription').textContent = `${source} · ${weather.condition || 'Clear'}`;
+
+  // Real-time weather metrics
+  if ($('weatherFeelsLike')) {
+    $('weatherFeelsLike').textContent = Number.isFinite(weather.feels_like) ? `${Math.round(weather.feels_like)}°C` : (Number.isFinite(weather.temperature) ? `${Math.round(weather.temperature)}°C` : '--');
+  }
+  if ($('weatherPrecip')) {
+    const precipVal = Number.isFinite(weather.precipitation_prob) ? `${Math.round(weather.precipitation_prob * 100)}%` : '0%';
+    $('weatherPrecip').textContent = precipVal;
+  }
+  if ($('weatherHumidity')) {
+    $('weatherHumidity').textContent = Number.isFinite(weather.humidity) ? `${Math.round(weather.humidity)}%` : '--';
+  }
+  if ($('weatherWind')) {
+    $('weatherWind').textContent = Number.isFinite(weather.wind_speed) ? `${weather.wind_speed} m/s` : '--';
+  }
+
   const band = weather.requirement_band || {};
   $('weatherLayers').textContent = band.required_layers?.length ? `Bring a little comfort: ${band.required_layers.join(', ')}.` : 'Keep it light. A breathable base is a good place to start.';
 }
@@ -177,8 +230,19 @@ async function upload(file) {
   const session = state.session; state.uploading = true; $('photoInput').disabled = true; $('uploadReview').hidden = true;
   $('uploadStatus').textContent = 'Analyzing and adding piece to wardrobe…';
   try {
-    const form = new FormData(); form.append('file', file);
-    let item = await api.request('/wardrobe/items', { method: 'POST', body: form }); if (session !== state.session) return;
+    const form = new FormData();
+    form.append('file', file);
+
+    // Read selected category and custom name if provided
+    const selectedCatBtn = document.querySelector('#uploadCategoryTabs button.selected');
+    const selectedCat = selectedCatBtn ? selectedCatBtn.dataset.cat : '';
+    const customName = $('uploadItemName') ? $('uploadItemName').value.trim() : '';
+
+    if (selectedCat) form.append('category', selectedCat);
+    if (customName) form.append('name', customName);
+
+    let item = await api.request('/wardrobe/items', { method: 'POST', body: form });
+    if (session !== state.session) return;
     
     // Fast polling fallback if item is still in processing state
     for (let attempt=0; item.status === 'processing' && attempt<10; attempt++) {
@@ -191,14 +255,16 @@ async function upload(file) {
     }
     if (session !== state.session) return;
     if (item.status === 'ready') {
-      $('uploadStatus').textContent = 'Your piece is ready. Added to your wardrobe.';
-      toast('Your piece is ready and in your wardrobe!');
+      const pieceName = item.subtype || item.category || 'Piece';
+      $('uploadStatus').textContent = `Your ${pieceName} is ready. Added to your wardrobe.`;
+      toast(`Your ${pieceName} was added to your wardrobe!`);
     } else if (item.status === 'needs_review') {
       $('uploadStatus').textContent = 'Your photo needs a closer look. Review the available images below.';
       toast('Piece uploaded. Quality review suggested.');
     } else {
       $('uploadStatus').textContent = 'Your piece is processing in the background.';
     }
+    if ($('uploadItemName')) $('uploadItemName').value = '';
     renderUploadReview(item);
     await Promise.all([loadWardrobe(), loadLooks()]);
   } catch (error) { if (session === state.session) $('uploadStatus').textContent = errorMessage(error); }
@@ -291,21 +357,75 @@ $('locationButton').onclick = async () => {
     position => {
       $('locationButton').disabled = false;
       if (session !== state.session) return;
+      state.city = null; // Clear manual city override
       state.coords = {
         lat: Number(position.coords.latitude.toFixed(4)),
         lon: Number(position.coords.longitude.toFixed(4))
       };
-      toast('Live location acquired. Refreshing forecast…');
+      toast('Live GPS location acquired. Refreshing forecast…');
       loadLooks();
     },
     () => {
       $('locationButton').disabled = false;
-      toast('Location permission not granted. Using default forecast.');
+      toast('Location permission not granted. You can search any city below.');
       loadLooks();
     },
     { timeout: 10000, maximumAge: 60000 }
   );
 };
+
+// City Search Handler
+async function handleCitySearch() {
+  const input = $('citySearchInput');
+  if (!input) return;
+  const query = input.value.trim();
+  if (!query) {
+    toast('Please enter a city name.');
+    return;
+  }
+  if (!state.user) {
+    const ok = await loginDemo(false);
+    if (!ok) { openAuth(); return; }
+  }
+  if ($('citySearchBtn')) $('citySearchBtn').disabled = true;
+  $('weatherDescription').textContent = `Looking up forecast for ${query}…`;
+  try {
+    state.city = query;
+    state.coords = null;
+    toast(`Fetching real-time weather for ${query}…`);
+    await loadLooks();
+  } catch (e) {
+    toast(`Could not find weather for ${query}`);
+  } finally {
+    if ($('citySearchBtn')) $('citySearchBtn').disabled = false;
+  }
+}
+
+if ($('citySearchBtn')) {
+  $('citySearchBtn').onclick = handleCitySearch;
+}
+if ($('citySearchInput')) {
+  $('citySearchInput').addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      handleCitySearch();
+    }
+  });
+}
+
+// Studio category selector tabs
+const studioCategoryTabs = $('uploadCategoryTabs');
+if (studioCategoryTabs) {
+  studioCategoryTabs.onclick = event => {
+    const button = event.target.closest('button[data-cat]');
+    if (!button) return;
+    for (const btn of studioCategoryTabs.querySelectorAll('button')) {
+      btn.classList.toggle('selected', btn === button);
+      btn.setAttribute('aria-pressed', String(btn === button));
+    }
+  };
+}
+
 $('photoInput').onchange = event => upload(event.target.files[0]);
 for (const type of ['dragover','dragleave','drop']) $('dropZone').addEventListener(type, event => {
   event.preventDefault();

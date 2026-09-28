@@ -163,6 +163,9 @@ class RecommendationEngine:
 
         # --- Weather ---
         weather_scores = []
+        has_outerwear = any(item.category == "outerwear" for item in items)
+        required_layers = requirement_band.get("required_layers", [])
+
         for item in items:
             subtype = item.subtype
             stored_warmth = None  # no warmth_rating column yet → infer
@@ -175,6 +178,18 @@ class RecommendationEngine:
                     excluded_subtypes=excluded,
                 )
             )
+
+        # Layer appropriateness modifier
+        if target_warmth <= 0.20 and has_outerwear:
+            # Penalize unnecessary heavy jackets in hot weather
+            weather_scores.append(0.10)
+        elif target_warmth >= 0.65 and "outerwear" in required_layers:
+            # Reward coat/outerwear presence in freezing/cold weather
+            if has_outerwear:
+                weather_scores.append(0.95)
+            else:
+                weather_scores.append(0.30)
+
         weather_s = sum(weather_scores) / len(weather_scores) if weather_scores else 0.75
 
         # --- Occasion ---
@@ -239,6 +254,7 @@ class RecommendationEngine:
     def _generate_skeletons(
         self,
         by_category: Dict[str, List[ClothingItem]],
+        requirement_band: Optional[Dict[str, Any]] = None,
     ) -> List[List[ClothingItem]]:
         """
         Generate candidate outfit combinations.
@@ -251,14 +267,20 @@ class RecommendationEngine:
         tops = by_category.get("tops", [])
         bottoms = by_category.get("bottoms", [])
         dresses = by_category.get("dresses", [])
-        outerwear = by_category.get("outerwear", [None])  # None = skip layer
+        raw_outerwear = by_category.get("outerwear", [])
         shoes = by_category.get("shoes", [None])
 
-        # Ensure None placeholders exist for optional layers
-        if not outerwear:
+        target_warmth = (requirement_band or {}).get("warmth_level", 0.35)
+
+        # Adjust outerwear consideration according to weather temperature band
+        if target_warmth <= 0.20:
+            # Hot weather: skip heavy outerwear entirely
             outerwear = [None]
+        elif target_warmth >= 0.60:
+            # Cold weather: prioritize outerwear combinations
+            outerwear = raw_outerwear + [None] if raw_outerwear else [None]
         else:
-            outerwear = [None] + outerwear  # also try without outerwear
+            outerwear = [None] + raw_outerwear if raw_outerwear else [None]
 
         if not shoes:
             shoes = [None]
@@ -350,7 +372,7 @@ class RecommendationEngine:
             by_category.setdefault(cat, []).append(item)
 
         # 4. Generate outfit skeletons
-        skeletons = self._generate_skeletons(by_category)
+        skeletons = self._generate_skeletons(by_category, requirement_band=requirement_band)
         if not skeletons:
             return []
 

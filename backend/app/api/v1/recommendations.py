@@ -29,6 +29,7 @@ async def get_outfit_recommendations(
     occasion: Optional[str] = Query("casual", description="Target occasion"),
     lat: Optional[float] = Query(None, description="Latitude for weather lookup"),
     lon: Optional[float] = Query(None, description="Longitude for weather lookup"),
+    city: Optional[str] = Query(None, description="Optional city name for weather lookup"),
     override_weather: Optional[str] = Query(
         None,
         description="Force a weather condition label (e.g. 'hot', 'cold') for testing"
@@ -40,7 +41,7 @@ async def get_outfit_recommendations(
     Generate ranked outfit recommendations for the authenticated user.
 
     Process:
-      1. Resolve weather (user location → WeatherService → requirement_band).
+      1. Resolve weather (city or user location → WeatherService → requirement_band).
       2. Build user preference context from UserPreference row.
       3. Fetch recent outfit history for diversity scoring.
       4. Run RecommendationEngine.generate() → top-N candidates.
@@ -49,15 +50,24 @@ async def get_outfit_recommendations(
     # --- 1. Weather ---
     resolved_lat = lat
     resolved_lon = lon
+    weather_svc = WeatherService(db)
+
+    if city and city.strip():
+        matches = await weather_svc._client.search_city(city.strip())
+        if matches:
+            resolved_lat = matches[0]["latitude"]
+            resolved_lon = matches[0]["longitude"]
+
     if resolved_lat is None or resolved_lon is None:
         loc = current_user.location or {}
         resolved_lat = float(loc.get("lat", 28.6))
         resolved_lon = float(loc.get("lon", 77.2))
 
-    weather_svc = WeatherService(db)
     weather_data = await weather_svc.get_current_weather(
         lat=resolved_lat, lon=resolved_lon
     )
+    if city and city.strip() and "matches" in locals() and matches:
+        weather_data["city"] = f"{matches[0]['name']}, {matches[0].get('country_code', '')}".strip(", ")
     requirement_band = weather_data.get("requirement_band", {})
     weather_snapshot_id = weather_data.get("snapshot_id")
 
@@ -116,28 +126,32 @@ async def get_outfit_recommendations(
         weather_snapshot_id=weather_snapshot_id,
     )
 
+    weather_info = {
+        "source": weather_data.get("source", "unknown"),
+        "temperature": weather_data.get("temperature"),
+        "feels_like": weather_data.get("feels_like"),
+        "humidity": weather_data.get("humidity"),
+        "wind_speed": weather_data.get("wind_speed"),
+        "precipitation_prob": weather_data.get("precipitation_prob"),
+        "condition": weather_data.get("condition"),
+        "condition_family": weather_data.get("condition_family"),
+        "city": weather_data.get("city") or "Your Location",
+        "country": weather_data.get("country", ""),
+        "requirement_band": requirement_band,
+    }
+
     if not candidates:
         return {
             "occasion": occasion,
             "recommendations": [],
-            "weather": {
-                "source": weather_data.get("source", "unknown"),
-                "temperature": weather_data.get("temperature"),
-                "condition": weather_data.get("condition"),
-                "requirement_band": requirement_band,
-            },
+            "weather": weather_info,
             "notice": "No suitable outfits found. Add more items to your wardrobe.",
         }
 
     return {
         "occasion": occasion,
         "recommendations": [c.to_dict() for c in candidates],
-        "weather": {
-            "source": weather_data.get("source", "unknown"),
-            "temperature": weather_data.get("temperature"),
-            "condition": weather_data.get("condition"),
-            "requirement_band": requirement_band,
-        },
+        "weather": weather_info,
         "total": len(candidates),
     }
 

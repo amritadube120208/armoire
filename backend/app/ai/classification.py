@@ -209,6 +209,105 @@ def _pick_formality_confidence(image_bytes: bytes) -> float:
     return _hash_float(image_bytes, "form_conf", 0.68, 0.93)
 
 
+# Keyword mapping for smart garment detection from filenames or hints
+KEYWORD_MAPPINGS = [
+    # Shoes (check first to avoid 'dress-shoes' being matched as 'dress')
+    (["sneaker", "sneakers", "trainer", "trainers", "tennis-shoe", "kicks"], "shoes", "sneakers", "casual", ["all-season"]),
+    (["boot", "boots", "chelsea", "ankle-boot"], "shoes", "boots", "smart-casual", ["fall", "winter"]),
+    (["loafer", "loafers"], "shoes", "loafers", "smart-casual", ["spring", "summer", "fall"]),
+    (["oxford", "derby", "brogue", "dress-shoes", "dress-shoe"], "shoes", "oxford", "formal", ["all-season"]),
+    (["heel", "heels", "pump", "pumps", "stiletto", "stilettos"], "shoes", "heels", "formal", ["all-season"]),
+    (["sandal", "sandals", "slide", "slides", "flip-flop"], "shoes", "sandals", "casual", ["spring", "summer"]),
+    (["shoe", "shoes", "footwear"], "shoes", "sneakers", "casual", ["all-season"]),
+    # Outerwear (check before tops to catch 'denim-jacket', 'leather-jacket')
+    (["trench", "trench-coat"], "outerwear", "trench-coat", "smart-casual", ["spring", "fall"]),
+    (["puffer", "puffer-jacket", "down-jacket", "parka"], "outerwear", "puffer-jacket", "casual", ["fall", "winter"]),
+    (["blazer", "suit-jacket", "sport-coat"], "outerwear", "blazer", "smart-casual", ["spring", "fall", "winter"]),
+    (["leather-jacket", "biker-jacket", "bomber", "bomber-jacket"], "outerwear", "leather-jacket", "casual", ["spring", "fall"]),
+    (["wool-coat", "overcoat", "camel-coat", "peacoat", "topcoat"], "outerwear", "wool-coat", "formal", ["fall", "winter"]),
+    (["denim-jacket", "jean-jacket"], "outerwear", "denim-jacket", "casual", ["spring", "fall"]),
+    (["cardigan"], "outerwear", "cardigan", "casual", ["spring", "fall"]),
+    (["windbreaker", "anorak"], "outerwear", "windbreaker", "casual", ["spring", "fall"]),
+    (["jacket", "coat", "outerwear"], "outerwear", "jacket", "casual", ["fall", "winter", "spring"]),
+    # Bottoms
+    (["jean", "jeans", "denim"], "bottoms", "jeans", "casual", ["all-season"]),
+    (["chino", "chinos", "khaki", "khakis"], "bottoms", "chinos", "smart-casual", ["all-season"]),
+    (["trouser", "trousers", "dress-pant", "dress-pants", "slacks", "pant", "pants"], "bottoms", "dress-pants", "formal", ["all-season"]),
+    (["short", "shorts", "bermuda"], "bottoms", "shorts", "casual", ["summer", "spring"]),
+    (["skirt", "pleated-skirt", "mini-skirt"], "bottoms", "skirt", "smart-casual", ["spring", "summer", "fall"]),
+    (["legging", "leggings", "tights"], "bottoms", "leggings", "casual", ["fall", "winter"]),
+    (["jogger", "joggers", "sweatpants", "trackpants"], "bottoms", "joggers", "casual", ["fall", "winter"]),
+    (["bottom", "bottoms"], "bottoms", "jeans", "casual", ["all-season"]),
+    # Dresses
+    (["maxi-dress", "maxi"], "dresses", "maxi-dress", "smart-casual", ["spring", "summer"]),
+    (["mini-dress", "mini"], "dresses", "mini-dress", "casual", ["spring", "summer"]),
+    (["evening-gown", "gown"], "dresses", "evening-gown", "formal", ["all-season"]),
+    (["wrap-dress"], "dresses", "wrap-dress", "smart-casual", ["spring", "summer", "fall"]),
+    (["shirt-dress"], "dresses", "shirt-dress", "casual", ["spring", "summer"]),
+    (["midi-dress", "dress", "frock", "sundress"], "dresses", "midi-dress", "smart-casual", ["spring", "summer"]),
+    # Tops
+    (["tshirt", "t-shirt", "tee", "crewneck", "v-neck"], "tops", "t-shirt", "casual", ["spring", "summer"]),
+    (["polo"], "tops", "polo", "smart-casual", ["spring", "summer", "fall"]),
+    (["dress-shirt", "button-down", "button-up", "oxford-shirt", "shirt"], "tops", "dress-shirt", "smart-casual", ["all-season"]),
+    (["blouse"], "tops", "blouse", "smart-casual", ["spring", "summer", "fall"]),
+    (["sweater", "knit", "knitwear", "pullover", "jumper", "sweatshirt"], "tops", "sweater", "smart-casual", ["fall", "winter"]),
+    (["hoodie", "hooded"], "tops", "hoodie", "casual", ["fall", "winter"]),
+    (["tank", "tank-top", "sleeveless", "camisole"], "tops", "tank-top", "casual", ["spring", "summer"]),
+    (["turtleneck", "roll-neck"], "tops", "turtleneck", "smart-casual", ["fall", "winter"]),
+    (["crop-top"], "tops", "crop-top", "casual", ["spring", "summer"]),
+    (["top", "tops"], "tops", "t-shirt", "casual", ["spring", "summer"]),
+    # Bags
+    (["tote", "tote-bag"], "bags", "tote-bag", "casual", ["all-season"]),
+    (["backpack", "rucksack"], "bags", "backpack", "casual", ["all-season"]),
+    (["clutch"], "bags", "clutch", "formal", ["all-season"]),
+    (["crossbody"], "bags", "crossbody", "casual", ["all-season"]),
+    (["handbag", "purse", "bag", "bags"], "bags", "handbag", "smart-casual", ["all-season"]),
+    # Accessories
+    (["belt"], "accessories", "belt", "smart-casual", ["all-season"]),
+    (["scarf"], "accessories", "scarf", "casual", ["fall", "winter"]),
+    (["hat", "cap", "beanie", "fedora"], "accessories", "hat", "casual", ["all-season"]),
+    (["sunglasses", "shades", "glasses"], "accessories", "sunglasses", "casual", ["spring", "summer"]),
+    (["watch"], "accessories", "watch", "smart-casual", ["all-season"]),
+    (["necklace", "chain", "pendant"], "accessories", "necklace", "smart-casual", ["all-season"]),
+    (["tie", "necktie", "bowtie"], "accessories", "tie", "formal", ["all-season"]),
+]
+
+
+def detect_from_hints(
+    filename: Optional[str] = None,
+    category_hint: Optional[str] = None,
+    subtype_hint: Optional[str] = None,
+) -> Optional[Tuple[str, str, str, List[str], float]]:
+    """
+    Infers (category, subtype, formality, seasons, confidence) from explicit hints or filename.
+    Returns None if no keyword matches.
+    """
+    # 1. User explicit category
+    if category_hint:
+        cat_clean = category_hint.strip().lower()
+        if cat_clean in TAXONOMY:
+            sub = subtype_hint.strip().lower() if subtype_hint else TAXONOMY[cat_clean][0][0]
+            # Find formality & seasons in taxonomy
+            entries = TAXONOMY.get(cat_clean, [])
+            for s, f, sea in entries:
+                if s == sub:
+                    return cat_clean, sub, f, sea, 0.95
+            return cat_clean, sub, "casual", ["spring", "summer", "fall"], 0.95
+
+    # 2. Filename keyword inspection
+    if filename:
+        import re
+        normalized = re.sub(r"[^a-z0-9]+", " ", filename.lower())
+        tokens = normalized.split()
+        for keywords, cat, sub, formality, seasons in KEYWORD_MAPPINGS:
+            for kw in keywords:
+                # Match full token or composite keyword (e.g. 't-shirt' or 'tshirt')
+                if kw in tokens or kw.replace("-", "") in tokens or kw in normalized:
+                    return cat, sub, formality, seasons, 0.92
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Classifier
 # ---------------------------------------------------------------------------
@@ -237,23 +336,31 @@ class ClothingClassifier:
     async def classify(
         self,
         image_bytes: bytes,
-        quality_band: str = "good"
+        quality_band: str = "good",
+        category_hint: Optional[str] = None,
+        subtype_hint: Optional[str] = None,
+        filename: Optional[str] = None,
     ) -> ClassificationResult:
         """
-        Classify a clothing item from raw image bytes.
-
-        All randomness is seeded deterministically from image_bytes so:
-          - Same image → same classification every time.
-          - Different images → statistically varied categories.
+        Classify a clothing item from raw image bytes, respecting explicit hints and filename.
         """
         cap = self.CONFIDENCE_CAPS.get(quality_band, 0.92)
 
-        # --- category ---
-        category, cat_conf = _pick_category(image_bytes)
-        cat_conf = min(cat_conf, cap)
+        # Check intelligent keyword/hint detection first
+        hint_match = detect_from_hints(
+            filename=filename,
+            category_hint=category_hint,
+            subtype_hint=subtype_hint,
+        )
 
-        # --- subtype / formality / seasons ---
-        subtype, formality, seasons = _pick_subtype(image_bytes, category)
+        if hint_match:
+            category, subtype, formality, seasons, cat_conf = hint_match
+            cat_conf = min(cat_conf, cap)
+        else:
+            # Deterministic fallback derived from image
+            category, cat_conf = _pick_category(image_bytes)
+            cat_conf = min(cat_conf, cap)
+            subtype, formality, seasons = _pick_subtype(image_bytes, category)
 
         # For "poor" images, occasionally degrade to None subtype
         if quality_band == "poor":
@@ -280,3 +387,4 @@ class ClothingClassifier:
 
 
 classifier = ClothingClassifier()
+

@@ -4,6 +4,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Form,
     HTTPException,
     Query,
     UploadFile,
@@ -32,6 +33,9 @@ router = APIRouter(prefix="/wardrobe", tags=["Wardrobe"])
 )
 async def upload_clothing_item(
     file: UploadFile = File(..., description="Clothing photo (JPEG, PNG, WEBP)"),
+    category: Optional[str] = Form(None, description="Optional clothing category (tops, bottoms, outerwear, dresses, shoes, accessories, bags)"),
+    subtype: Optional[str] = Form(None, description="Optional clothing subtype (e.g. t-shirt, jeans, trench-coat)"),
+    name: Optional[str] = Form(None, description="Optional custom garment name/title"),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_db)
 ):
@@ -41,6 +45,7 @@ async def upload_clothing_item(
       - Strips EXIF/GPS server-side
       - Evaluates quality gate (Laplacian blur, brightness, resolution)
       - Enqueues background worker for detection, classification, and embedding
+      - Creates independent wardrobe item with unique UUID and metadata
     """
     raw_bytes = await file.read()
     if not raw_bytes:
@@ -53,7 +58,10 @@ async def upload_clothing_item(
     item = await image_service.upload_clothing_image(
         user_id=current_user.id,
         raw_bytes=raw_bytes,
-        filename=file.filename or "upload.jpg"
+        filename=file.filename or "upload.jpg",
+        category=category,
+        subtype=subtype,
+        name=name
     )
     return item
 
