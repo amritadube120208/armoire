@@ -30,6 +30,10 @@ try:
         enable_utc=True,
         task_track_started=True,
         task_time_limit=180,
+        # A failed broker must not leave an HTTP upload blocked on Celery's
+        # long default publish retry loop; ImageService has an in-process fallback.
+        task_publish_retry=False,
+        broker_connection_timeout=2,
     )
 except ImportError:
     class DummyTask:

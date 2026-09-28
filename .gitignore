@@ -25,11 +25,12 @@ storage_data/*
 backend/storage_data/*
 !backend/storage_data/.gitkeep
 
-# Environment variables
+# Environment variables (allow only the committed safe templates)
 .env
-.env.local
-.env.*.local
-backend/.env
+.env.*
+!.env.example
+!backend/.env.example
+!backend/.env.production.example
 
 # IDE
 .vscode/

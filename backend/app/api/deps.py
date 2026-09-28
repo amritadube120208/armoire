@@ -1,6 +1,6 @@
 import uuid
-from typing import AsyncGenerator, Optional
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from typing import AsyncGenerator
+from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
@@ -57,27 +57,3 @@ async def get_current_user(
         )
 
     return user
-
-
-async def get_refresh_token_from_request(
-    request: Request,
-    refresh_token_cookie: Optional[str] = Cookie(None, alias="refresh_token")
-) -> str:
-    """
-    Retrieves refresh token from httpOnly cookie or request body.
-    """
-    if refresh_token_cookie:
-        return refresh_token_cookie
-
-    # Fallback to authorization header or json body
-    try:
-        body = await request.json()
-        if "refresh_token" in body:
-            return body["refresh_token"]
-    except Exception:
-        pass
-
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Refresh token missing from cookie and request body."
-    )

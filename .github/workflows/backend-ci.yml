@@ -2,7 +2,6 @@ name: Backend CI
 
 on:
   push:
-    branches: [ "main", "master", "develop" ]
   pull_request:
     branches: [ "main", "master", "develop" ]
 
@@ -21,6 +20,14 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
+      - name: Set up Node.js for frontend session tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test frontend authentication client
+        run: node --test backend/tests/frontend/api.test.cjs
+
       - name: Install system dependencies (OpenCV & image libs)
         run: |
           sudo apt-get update
@@ -30,7 +37,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: Run Alembic migrations
         working-directory: backend
@@ -67,7 +74,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: actions/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v3
 
       - name: Build backend image
         uses: docker/build-push-action@v5

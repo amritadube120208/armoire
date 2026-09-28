@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import uuid
 from typing import Any, Dict, Optional, Union
 import bcrypt
 from jose import JWTError, jwt
@@ -33,7 +34,8 @@ def create_access_token(
     to_encode: Dict[str, Any] = {
         "exp": expire,
         "sub": str(subject),
-        "type": "access"
+        "type": "access",
+        "jti": str(uuid.uuid4()),
     }
     encoded_jwt = jwt.encode(
         to_encode,
@@ -56,7 +58,8 @@ def create_refresh_token(
     to_encode: Dict[str, Any] = {
         "exp": expire,
         "sub": str(subject),
-        "type": "refresh"
+        "type": "refresh",
+        "jti": str(uuid.uuid4()),
     }
     encoded_jwt = jwt.encode(
         to_encode,
@@ -64,6 +67,13 @@ def create_refresh_token(
         algorithm=settings.ALGORITHM
     )
     return encoded_jwt
+
+
+def hash_refresh_id(token_id: str) -> str:
+    """Store a one-way identifier for a refresh token, never the token itself."""
+    import hashlib
+
+    return hashlib.sha256(token_id.encode("utf-8")).hexdigest()
 
 
 def decode_token(token: str) -> Optional[Dict[str, Any]]:

@@ -1,6 +1,6 @@
 # Smart Wardrobe & AI Recommendation System — Backend (Phases 1–9 Complete)
 
-Production-grade FastAPI backend for the **Smart Wardrobe & AI Recommendation System**, built strictly according to `Master.md`, `Skills.md`, `Backend.md`, and `Upgradation.md` (Phases 1–9 complete).
+FastAPI backend for the **Smart Wardrobe & AI Recommendation System**. This document describes the current implementation; the product specifications in the repository also include planned capabilities.
 
 ---
 
@@ -9,11 +9,11 @@ Production-grade FastAPI backend for the **Smart Wardrobe & AI Recommendation Sy
 ### Phase 1: Architecture & Scaffolding
 - **Application Core**: FastAPI application with lifespan management, CORS middleware, centralized structured logging (`structlog`), Pydantic Settings reading `.env`.
 - **Health Checks**: `GET /health` and `GET /api/v1/health` returning live service health.
-- **Docker Compose**: Production-ready orchestration (`FastAPI` + `Postgres 16 with pgvector` + `Redis 7` + `Celery Worker`).
-- **Database Migrations**: Alembic setup with `001_initial_schema.py` creating all 10 tables from Backend.md §5 (`users`, `user_preferences`, `clothing_items`, `clothing_images`, `clothing_attributes`, `outfits`, `outfit_items`, `weather_snapshots`, `recommendations`, `feedbacks`).
+- **Docker Compose**: Local development services in `docker-compose.yml`; single-host production starter in `docker-compose.prod.yml`.
+- **Database Migrations**: Alembic revisions create application tables and refresh-session storage.
 
 ### Phase 3: Authentication & Security (Backend.md Pipeline 1)
-- **Signup**: `POST /api/v1/auth/signup` — email format & password strength validation, unique email constraint, bcrypt password hashing, automatic default preference profile creation.
+- **Signup**: `POST /api/v1/auth/signup` — email format, password length and bcrypt input bound validation, unique email constraint, bcrypt password hashing, automatic default preference profile creation.
 - **Login**: `POST /api/v1/auth/login` — credential verification, short-lived JWT access token issuance (15 min), httpOnly secure refresh token cookie (7 days).
 - **Refresh**: `POST /api/v1/auth/refresh` — token rotation via secure httpOnly cookie.
 - **Logout**: `POST /api/v1/auth/logout` — invalidates refresh session.
@@ -44,7 +44,7 @@ Production-grade FastAPI backend for the **Smart Wardrobe & AI Recommendation Sy
 - **Async Workers**: Celery + Redis task execution (`app/workers/tasks.py`) with automatic non-blocking asyncio fallback for standalone environments.
 
 ### Phase 6: Deterministic AI Classification (`app/ai/classification.py`)
-- Full hash-based category and subtype classification mapping raw image bytes deterministically to 7 categories and 60+ garment subtypes.
+- Deterministic placeholder category and subtype classification; it is not a trained visual model.
 - Real quality-gate confidence capping (`{"poor": 0.45, "borderline": 0.72, "good": 0.92}`).
 - Generates seasonal tags, pattern estimates, and formality ratings.
 
@@ -113,6 +113,7 @@ All endpoints under `/api/v1`. Authentication required via `Authorization: Beare
 1. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
+   alembic upgrade head
    ```
 2. **Start the API**:
    ```bash
@@ -123,24 +124,24 @@ All endpoints under `/api/v1`. Authentication required via `Authorization: Beare
    - ReDoc: [http://localhost:8000/api/v1/redoc](http://localhost:8000/api/v1/redoc)
    - Health check: [http://localhost:8000/health](http://localhost:8000/health)
 
-### Running with Docker Compose
+### Running the local development stack
 ```bash
+cp .env.example .env
 docker compose up --build
 ```
-This launches:
-- `smart_wardrobe_api` (FastAPI) on port `8000`
-- `smart_wardrobe_postgres` (Postgres 16 with pgvector) on port `5432`
-- `smart_wardrobe_redis` (Redis 7) on port `6379`
-- `smart_wardrobe_celery_worker` (Celery background worker)
+PostgreSQL and Redis ports are bound to localhost. See [DEPLOYMENT.md](DEPLOYMENT.md) for the production Compose profile, secret setup, TLS boundary, and operational checklist.
 
 ---
 
 ## 4. Running Tests
 
-Run the complete 36-test suite:
+Install the test dependencies and run the suite:
 ```bash
-python -m pytest -v
+pip install -r requirements-dev.txt
+python -m pytest -q
 ```
+
+Frontend authentication tests run from the repository root with `node --test backend/tests/frontend/api.test.cjs`.
 
 To run unit tests only:
 ```bash

@@ -21,11 +21,21 @@ def make_test_jpeg(width: int = 300, height: int = 300) -> bytes:
 
 
 @pytest.mark.asyncio
-async def test_full_auth_and_wardrobe_upload_pipeline():
+async def test_full_auth_and_wardrobe_upload_pipeline(monkeypatch):
     # Ensure fresh DB tables
     async with async_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+
+    # Exercise the upload fallback deterministically without waiting for a Redis
+    # broker that is intentionally absent from the isolated test environment.
+    def broker_unavailable(*args, **kwargs):
+        raise ConnectionError("Redis is not configured for this integration test")
+
+    monkeypatch.setattr(
+        "app.services.image_service.process_clothing_item_task.delay",
+        broker_unavailable,
+    )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
