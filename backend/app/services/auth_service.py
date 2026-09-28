@@ -1,6 +1,8 @@
 import uuid
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 from fastapi import HTTPException, status
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.security import (
@@ -8,9 +10,10 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     get_password_hash,
+    hash_refresh_id,
     verify_password,
 )
-from app.models.user import User
+from app.models.user import RefreshSession, User
 from app.repositories.user_repo import UserRepository
 from app.schemas.auth import (
     LoginRequest,
@@ -24,6 +27,24 @@ class AuthService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.user_repo = UserRepository(session)
+
+    def _save_refresh_session(self, user_id: uuid.UUID, token: str) -> None:
+        payload = decode_token(token) or {}
+        token_id = payload.get("jti")
+        expires_at = payload.get("exp")
+        if not token_id or not expires_at:
+            raise RuntimeError("New refresh token is missing its session claims")
+        self.session.add(RefreshSession(
+            user_id=user_id,
+            token_id_hash=hash_refresh_id(token_id),
+            expires_at=datetime.fromtimestamp(float(expires_at), tz=timezone.utc),
+        ))
+
+    def _issue_tokens(self, user_id: uuid.UUID) -> Tuple[str, str]:
+        access_token = create_access_token(user_id)
+        refresh_token = create_refresh_token(user_id)
+        self._save_refresh_session(user_id, refresh_token)
+        return access_token, refresh_token
 
     async def register(self, req: SignupRequest) -> Tuple[User, str, str]:
         """
@@ -48,8 +69,7 @@ class AuthService:
             name=req.name
         )
 
-        access_token = create_access_token(user.id)
-        refresh_token = create_refresh_token(user.id)
+        access_token, refresh_token = self._issue_tokens(user.id)
         return user, access_token, refresh_token
 
     async def authenticate(self, req: LoginRequest) -> Tuple[User, str, str]:
@@ -67,8 +87,7 @@ class AuthService:
                 detail="Account is inactive."
             )
 
-        access_token = create_access_token(user.id)
-        refresh_token = create_refresh_token(user.id)
+        access_token, refresh_token = self._issue_tokens(user.id)
         return user, access_token, refresh_token
 
     async def refresh_tokens(self, refresh_token: str) -> Tuple[str, str]:
@@ -81,22 +100,75 @@ class AuthService:
             )
 
         user_id_str = payload.get("sub")
-        if not user_id_str:
+        token_id = payload.get("jti")
+        if not isinstance(user_id_str, str) or not isinstance(token_id, str):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token subject."
             )
 
-        user = await self.user_repo.get_by_id(uuid.UUID(user_id_str))
+        try:
+            user_id = uuid.UUID(user_id_str)
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token subject."
+            )
+
+        user = await self.user_repo.get_by_id(user_id)
         if not user or not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found or inactive."
             )
 
-        new_access_token = create_access_token(user.id)
-        new_refresh_token = create_refresh_token(user.id)
+        now = datetime.now(timezone.utc)
+        token_hash = hash_refresh_id(token_id)
+        active_session = await self.session.scalar(select(RefreshSession.id).where(
+            RefreshSession.user_id == user.id,
+            RefreshSession.token_id_hash == token_hash,
+            RefreshSession.revoked_at.is_(None),
+            RefreshSession.expires_at > now,
+        ))
+        if not active_session:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token has already been used or revoked."
+            )
+
+        consumed = await self.session.execute(update(RefreshSession).where(
+            RefreshSession.id == active_session,
+            RefreshSession.revoked_at.is_(None),
+            RefreshSession.expires_at > now,
+        ).values(revoked_at=now))
+        if consumed.rowcount != 1:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token has already been used or revoked."
+            )
+
+        new_access_token, new_refresh_token = self._issue_tokens(user.id)
         return new_access_token, new_refresh_token
+
+    async def revoke_refresh_token(self, token: Optional[str], user_id: uuid.UUID) -> None:
+        """Revoke the refresh cookie for this user when it is still valid."""
+        if not token:
+            return
+        payload = decode_token(token)
+        if not payload or payload.get("type") != "refresh":
+            return
+        token_id = payload.get("jti")
+        try:
+            token_user_id = uuid.UUID(payload.get("sub", ""))
+        except (ValueError, TypeError, AttributeError):
+            return
+        if not token_id or token_user_id != user_id:
+            return
+        await self.session.execute(update(RefreshSession).where(
+            RefreshSession.user_id == user_id,
+            RefreshSession.token_id_hash == hash_refresh_id(token_id),
+            RefreshSession.revoked_at.is_(None),
+        ).values(revoked_at=datetime.now(timezone.utc)))
 
     async def update_profile(
         self,

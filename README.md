@@ -3,17 +3,16 @@
 > **Strategic Foundation**: *"CHECK ALL EXISTING IDEAS OF THIS SOLUTION AND THEN MAKE MINE BETTER THAN THEM IN EVERY ASPECT."*
 
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg?logo=fastapi&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.14-blue.svg?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.12-blue.svg?logo=python&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%20%2B%20pgvector-336791.svg?logo=postgresql&logoColor=white)
 ![OpenCV](https://img.shields.io/badge/OpenCV-Quality%20Gate-5C3EE8.svg?logo=opencv&logoColor=white)
-![Tests](https://img.shields.io/badge/Tests-36%20passed%20(100%25)-success.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 ---
 
 ## Overview
 
-**Armoire (Smart Wardrobe)** is a production-grade personal styling platform that recommends complete, weather-appropriate outfits strictly from **clothes the user already owns**. 
+**Armoire (Smart Wardrobe)** is a personal styling application that recommends complete, weather-aware outfits from **clothes the user already owns**. The current frontend is a static interface served by FastAPI; the production setup is a single-host Compose starter.
 
 Unlike incumbent digital closet apps (Whering, Acloset, Alta) that rely on opaque black-box recommendations or act as disguised retail shopping funnels, Armoire provides:
 1. **100% Transparent, Explainable Recommendations**: Every outfit reveals its exact mathematical score across 6 dimensions.
@@ -28,7 +27,7 @@ Unlike incumbent digital closet apps (Whering, Acloset, Alta) that rely on opaqu
 
 ```mermaid
 flowchart TD
-    Client[Next.js / Augustine Lookbook UI] -->|Bearer JWT| API[FastAPI Gateway /api/v1]
+    Client[Same-origin static wardrobe UI] -->|Bearer access JWT + HttpOnly refresh cookie| API[FastAPI Gateway /api/v1]
     
     subgraph Core Services
         Auth[Auth & Multi-Tenant User Profile]
@@ -57,7 +56,7 @@ flowchart TD
 
 ## Core Specification Documents
 
-The repository contains 5 comprehensive engineering specifications:
+The repository contains engineering specifications for planned and implemented capabilities:
 
 | Document | Purpose |
 |---|---|
@@ -149,6 +148,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ### 2. Access the Application
 - **Armoire Frontend UI**: [http://localhost:8000](http://localhost:8000) — sign up or sign in to your own wardrobe. Includes the reference brand film and a consistent ivory/olive design.
 - **Authentication and integration review**: [AUTHENTICATION.md](./AUTHENTICATION.md) — actual code behavior, token flow, frontend changes and remaining security gaps.
+- **Production deployment guide**: [backend/DEPLOYMENT.md](./backend/DEPLOYMENT.md) — production Compose setup, secret handling, HTTPS boundary and operations.
 - **Interactive Swagger API Docs**: [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs)
 - **ReDoc API Manual**: [http://localhost:8000/api/v1/redoc](http://localhost:8000/api/v1/redoc)
 - **Optional demo credentials (only after running the demo seeder; never used automatically by the frontend)**:
@@ -157,8 +157,10 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 ### 3. Run the Automated Test Suite
 ```bash
-python -m pytest -v
-# 36 passed in unit and integration test suites
+pip install -r requirements-dev.txt
+python -m pytest -q
+# From the repository root:
+node --test backend/tests/frontend/api.test.cjs
 ```
 
 ### 4. Run with Docker Compose
@@ -166,10 +168,10 @@ python -m pytest -v
 cd backend
 docker compose up --build
 ```
-Orchestrates FastAPI, PostgreSQL 16 with pgvector, Redis 7, and a Celery worker.
+Starts the local development stack. For production, follow [backend/DEPLOYMENT.md](./backend/DEPLOYMENT.md); production requires real secrets, private object storage, HTTPS, and database operations.
 
 ---
 
 ## License
 
-MIT License. Designed and architected as a production-grade AI Wardrobe Platform.
+MIT License.

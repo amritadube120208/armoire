@@ -1,5 +1,4 @@
-version: '3.8'
-
+# Development stack. Production deployments use docker-compose.prod.yml.
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -10,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wardrobe_secure_password}
       POSTGRES_DB: ${POSTGRES_DB:-smart_wardrobe}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +23,7 @@ services:
     container_name: smart_wardrobe_redis
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -39,12 +38,12 @@ services:
       dockerfile: Dockerfile
     container_name: smart_wardrobe_api
     restart: unless-stopped
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     volumes:
       - .:/app
       - storage_data:/app/storage_data
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-wardrobe_user}:${POSTGRES_PASSWORD:-wardrobe_secure_password}@db:5432/${POSTGRES_DB:-smart_wardrobe}
       - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-wardrobe_user}:${POSTGRES_PASSWORD:-wardrobe_secure_password}@db:5432/${POSTGRES_DB:-smart_wardrobe}

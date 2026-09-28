@@ -1,5 +1,5 @@
 from app.models.base import Base, GUID, async_engine, AsyncSessionLocal, sync_engine, SyncSessionLocal, get_async_db
-from app.models.user import User, UserPreference
+from app.models.user import User, UserPreference, RefreshSession
 from app.models.clothing import ClothingItem, ClothingImage, ClothingAttributes
 from app.models.outfit import Outfit, OutfitItem
 from app.models.feedback import Feedback
@@ -15,6 +15,7 @@ __all__ = [
     "get_async_db",
     "User",
     "UserPreference",
+    "RefreshSession",
     "ClothingItem",
     "ClothingImage",
     "ClothingAttributes",

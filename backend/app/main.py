@@ -34,9 +34,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
-    docs_url=f"{settings.API_V1_STR}/docs",
-    redoc_url=f"{settings.API_V1_STR}/redoc",
+    openapi_url=f"{settings.API_V1_STR}/openapi.json" if settings.DEBUG else None,
+    docs_url=f"{settings.API_V1_STR}/docs" if settings.DEBUG else None,
+    redoc_url=f"{settings.API_V1_STR}/redoc" if settings.DEBUG else None,
     lifespan=lifespan
 )
 
@@ -49,8 +49,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount local media storage in local development
-if settings.STORAGE_BACKEND == "local":
+# Local media is only served outside production; production requires private,
+# S3-compatible object storage and time-limited signed download URLs.
+if settings.STORAGE_BACKEND == "local" and settings.ENVIRONMENT != "production":
     local_storage_path = Path(settings.STORAGE_LOCAL_DIR)
     local_storage_path.mkdir(parents=True, exist_ok=True)
     app.mount("/storage", StaticFiles(directory=str(local_storage_path)), name="storage")
