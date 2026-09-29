@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.v1 import api_v1_router
@@ -56,6 +56,9 @@ if settings.STORAGE_BACKEND == "local":
     local_storage_path = Path(settings.STORAGE_LOCAL_DIR)
     local_storage_path.mkdir(parents=True, exist_ok=True)
     app.mount("/storage", StaticFiles(directory=str(local_storage_path)), name="storage")
+elif settings.STORAGE_BACKEND == "vercel_blob":
+    from app.api.media import router as private_media_router
+    app.include_router(private_media_router)
 
 
 # Mount static frontend assets
@@ -115,6 +118,10 @@ async def root():
     """Serve Augustine luxury frontend lookbook UI directly at root."""
     index_file = Path(__file__).resolve().parent / "static" / "index.html"
     if index_file.exists():
+        if settings.STORAGE_BACKEND == "vercel_blob":
+            html = index_file.read_text(encoding="utf-8")
+            html = html.replace("</head>", '<meta name="upload-max-bytes" content="3800000"></head>')
+            return HTMLResponse(html, headers={"Cache-Control": "no-store"})
         return FileResponse(str(index_file))
     return RedirectResponse(url="/api/v1/docs")
 

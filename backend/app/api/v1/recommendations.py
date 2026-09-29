@@ -57,6 +57,11 @@ async def get_outfit_recommendations(
         if matches:
             resolved_lat = matches[0]["latitude"]
             resolved_lon = matches[0]["longitude"]
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Could not locate '{city.strip()}'. Check the city name and try again.",
+            )
 
     if resolved_lat is None or resolved_lon is None:
         loc = current_user.location or {}

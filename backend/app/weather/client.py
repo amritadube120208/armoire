@@ -111,6 +111,19 @@ CONDITION_FAMILIES = {
     "ash": "extreme",
 }
 
+# Small offline index for common demo locations. Open-Meteo remains the
+# source of full worldwide geocoding when network access is available.
+OFFLINE_CITIES = [
+    {"name": "London", "country": "United Kingdom", "country_code": "GB", "latitude": 51.5072, "longitude": -0.1276, "aliases": ("london", "uk")},
+    {"name": "New Delhi", "country": "India", "country_code": "IN", "latitude": 28.6139, "longitude": 77.2090, "aliases": ("new delhi", "delhi")},
+    {"name": "Mumbai", "country": "India", "country_code": "IN", "latitude": 19.0760, "longitude": 72.8777, "aliases": ("mumbai", "bombay")},
+    {"name": "New York", "country": "United States", "country_code": "US", "latitude": 40.7128, "longitude": -74.0060, "aliases": ("new york", "nyc")},
+    {"name": "Paris", "country": "France", "country_code": "FR", "latitude": 48.8566, "longitude": 2.3522, "aliases": ("paris",)},
+    {"name": "Tokyo", "country": "Japan", "country_code": "JP", "latitude": 35.6762, "longitude": 139.6503, "aliases": ("tokyo",)},
+    {"name": "Sydney", "country": "Australia", "country_code": "AU", "latitude": -33.8688, "longitude": 151.2093, "aliases": ("sydney",)},
+    {"name": "Singapore", "country": "Singapore", "country_code": "SG", "latitude": 1.3521, "longitude": 103.8198, "aliases": ("singapore",)},
+]
+
 
 # ---------------------------------------------------------------------------
 # Helper: derive requirement band from normalised conditions
@@ -281,6 +294,10 @@ class WeatherClient:
                     return results
         except Exception as e:
             logger.warning("City search error: %s", e)
+        normalized = query.strip().casefold()
+        for city in OFFLINE_CITIES:
+            if any(normalized in alias for alias in city["aliases"]):
+                return [{key: value for key, value in city.items() if key != "aliases"}]
         return []
 
     async def _fetch_open_meteo(self, lat: float, lon: float) -> Dict[str, Any]:

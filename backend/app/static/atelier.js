@@ -231,7 +231,11 @@ async function upload(file) {
   $('uploadStatus').textContent = 'Analyzing and adding piece to wardrobe…';
   try {
     const form = new FormData();
-    form.append('file', file);
+    const maxRequestBytes = Number(document.querySelector('meta[name="upload-max-bytes"]')?.content || 0);
+    const uploadFile = maxRequestBytes && file.size > maxRequestBytes
+      ? await resizeImageForUpload(file, maxRequestBytes)
+      : file;
+    form.append('file', uploadFile);
 
     // Read selected category and custom name if provided
     const selectedCatBtn = document.querySelector('#uploadCategoryTabs button.selected');
@@ -269,6 +273,30 @@ async function upload(file) {
     await Promise.all([loadWardrobe(), loadLooks()]);
   } catch (error) { if (session === state.session) $('uploadStatus').textContent = errorMessage(error); }
   finally { state.uploading = false; $('photoInput').disabled = false; $('photoInput').value = ''; }
+}
+async function resizeImageForUpload(file, maxBytes) {
+  if (!window.createImageBitmap) throw new Error('This browser cannot resize the photo for upload. Try a smaller image.');
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement('canvas');
+  let scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+  for (let pass = 0; pass < 5; pass++) {
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Could not prepare that photo. Please choose another image.');
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    for (const quality of [0.82, 0.68, 0.54]) {
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', quality));
+      if (blob && blob.size <= maxBytes) {
+        bitmap.close();
+        const name = file.name.replace(/\.[^.]+$/, '') + '.webp';
+        return new File([blob], name, { type: 'image/webp', lastModified: file.lastModified });
+      }
+    }
+    scale *= 0.78;
+  }
+  bitmap.close();
+  throw new Error('That photo is still too large to upload. Please choose a smaller image.');
 }
 function renderUploadReview(item) {
   const review = $('uploadReview'); review.replaceChildren(); review.hidden = true;

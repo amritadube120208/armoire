@@ -1,5 +1,6 @@
 from typing import List, Optional, Union
-from pydantic import AnyHttpUrl, field_validator
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from pydantic import AnyHttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -54,6 +55,33 @@ class Settings(BaseSettings):
     # External APIs
     OPENWEATHER_API_KEY: Optional[str] = None
     REPLICATE_API_TOKEN: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_database_urls(cls, values):
+        """Adapt standard Neon URLs to SQLAlchemy's async and sync drivers."""
+        if not isinstance(values, dict):
+            return values
+        async_url = values.get("DATABASE_URL")
+        if not isinstance(async_url, str) or not async_url.startswith(("postgres://", "postgresql://")):
+            return values
+
+        sync_url = async_url.replace("postgres://", "postgresql://", 1)
+        if "SYNC_DATABASE_URL" not in values:
+            values["SYNC_DATABASE_URL"] = sync_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        parsed = urlsplit(async_url)
+        async_query = []
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+            if key.lower() == "channel_binding":
+                # Neon adds this libpq option to copied URLs; asyncpg doesn't accept it.
+                continue
+            if key.lower() == "sslmode" and value.lower() == "require":
+                key = "ssl"
+            async_query.append((key, value))
+        values["DATABASE_URL"] = urlunsplit(
+            parsed._replace(scheme="postgresql+asyncpg", query=urlencode(async_query))
+        )
+        return values
 
     model_config = SettingsConfigDict(
         env_file=".env",

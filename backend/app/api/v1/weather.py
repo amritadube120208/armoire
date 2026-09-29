@@ -7,7 +7,7 @@ GET /api/v1/weather/current
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -52,8 +52,10 @@ async def get_current_weather(
             city_override = f"{matches[0]['name']}, {matches[0].get('country_code', '')}".strip(", ")
             location_source = "city_search"
         else:
-            resolved_lat, resolved_lon = 28.6, 77.2
-            location_source = "default_new_delhi"
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Could not locate '{city.strip()}'. Check the city name and try again.",
+            )
     elif lat is not None and lon is not None:
         resolved_lat, resolved_lon = lat, lon
         location_source = "query_param"

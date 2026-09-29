@@ -1,7 +1,7 @@
 """
 AI Fashion Stylist Service.
-Repurposes the Groq agent architecture from amritadube120208/ai-chatbot
-into a personal fashion stylist and wardrobe advisor for Armoire.
+Connects Armoire's stylist to Vercel AI Gateway when configured and keeps
+the offline fashion fallback available when the external API is unavailable.
 Strictly excludes study/academic content and focuses exclusively on
 tailored outfit formulas, color harmony, and weather/occasion styling.
 """
@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import os
 from typing import Any, Dict, List, Optional
-from app.core.config import settings
+import httpx
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
 PRIMARY_MODEL = "openai/gpt-oss-120b"
 FALLBACK_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+AI_GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/chat/completions"
 
 FASHION_SYSTEM_PROMPT = """You are Armoire Atelier AI — a sophisticated, warm, and highly knowledgeable Personal Fashion Stylist and Wardrobe Consultant.
 
@@ -37,21 +38,9 @@ class StylistService:
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = (
             api_key
-            or os.environ.get("GROQ_API_KEY")
-            or getattr(settings, "GROQ_API_KEY", None)
-            or "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"
+            or os.environ.get("AI_GATEWAY_API_KEY")
         )
-        self._client = None
-
-    def _get_client(self):
-        if self._client is None and self.api_key:
-            try:
-                from groq import Groq
-                self._client = Groq(api_key=self.api_key)
-            except Exception as e:
-                logger.warning("Could not initialize Groq client: %s", e)
-        return self._client
-
+        self.model = os.environ.get("ARMOIRE_STYLIST_MODEL", PRIMARY_MODEL)
     async def get_stylist_advice(
         self,
         prompt: str,
@@ -105,19 +94,26 @@ class StylistService:
 
         messages.append({"role": "user", "content": clean_prompt})
 
-        # Try Groq models in priority order
-        client = self._get_client()
-        if client:
-            candidate_models = [PRIMARY_MODEL] + [m for m in FALLBACK_MODELS if m != PRIMARY_MODEL]
+        # Use Vercel AI Gateway when configured; keep a graceful offline fallback.
+        if self.api_key:
+            candidate_models = [self.model] + [m for m in FALLBACK_MODELS if m != self.model]
             for model_id in candidate_models:
                 try:
-                    resp = client.chat.completions.create(
-                        model=model_id,
-                        messages=messages,
-                        max_tokens=600,
-                        temperature=0.7,
-                    )
-                    reply_text = resp.choices[0].message.content.strip()
+                    async with httpx.AsyncClient(timeout=25.0) as client:
+                        resp = await client.post(
+                            AI_GATEWAY_URL,
+                            headers={"Authorization": f"Bearer {self.api_key}"},
+                            json={
+                                "model": model_id,
+                                "messages": messages,
+                                "max_tokens": 600,
+                                "temperature": 0.7,
+                                "stream": False,
+                            },
+                        )
+                        resp.raise_for_status()
+                        reply_text = (resp.json().get("choices", [{}])[0]
+                                      .get("message", {}).get("content") or "").strip()
                     if reply_text:
                         suggestions = self._derive_suggestions(clean_prompt, reply_text)
                         return {
@@ -126,7 +122,7 @@ class StylistService:
                             "suggestions": suggestions
                         }
                 except Exception as exc:
-                    logger.warning("Groq model %s failed: %s", model_id, exc)
+                    logger.warning("AI Gateway model %s failed: %s", model_id, exc)
 
         # Intelligent offline/fallback response if Groq is unavailable
         fallback_reply = self._generate_fashion_fallback(clean_prompt, occasion, weather)

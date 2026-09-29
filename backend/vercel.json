@@ -1,0 +1,3 @@
+{
+  "buildCommand": "python -m alembic upgrade head && python -m scripts.prepare_vercel_demo"
+}

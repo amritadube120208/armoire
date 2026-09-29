@@ -22,9 +22,14 @@ class StorageService:
     def __init__(self):
         self.backend = settings.STORAGE_BACKEND
         self.local_dir = Path(settings.STORAGE_LOCAL_DIR)
+        self.blob_client = None
 
         if self.backend == "local":
             self.local_dir.mkdir(parents=True, exist_ok=True)
+            self.s3_client = None
+        elif self.backend == "vercel_blob":
+            from vercel.blob import AsyncBlobClient
+            self.blob_client = AsyncBlobClient()
             self.s3_client = None
         else:
             if not boto3:
@@ -50,6 +55,14 @@ class StorageService:
             with open(file_path, "wb") as f:
                 f.write(data)
             return f"/storage/{key}"
+        elif self.backend == "vercel_blob":
+            result = await self.blob_client.put(
+                key,
+                data,
+                access="private",
+                add_random_suffix=True,
+            )
+            return f"/storage/{result.pathname}"
         else:
             self.s3_client.put_object(
                 Bucket=settings.S3_BUCKET_NAME,
@@ -69,6 +82,12 @@ class StorageService:
                 return None
             with open(file_path, "rb") as f:
                 return f.read()
+        elif self.backend == "vercel_blob":
+            clean_key = key.removeprefix("/storage/")
+            result = await self.blob_client.get(clean_key, access="private")
+            if result is None or result.status_code != 200 or result.stream is None:
+                return None
+            return b"".join([chunk async for chunk in result.stream])
         else:
             clean_key = key.replace("/storage/", "")
             try:
@@ -89,6 +108,8 @@ class StorageService:
             if not key.startswith("/storage/"):
                 return f"/storage/{key}"
             return key
+        elif self.backend == "vercel_blob":
+            return key if key.startswith("/storage/") else f"/storage/{key}"
         else:
             clean_key = key.replace("/storage/", "")
             url = self.s3_client.generate_presigned_url(
@@ -107,6 +128,13 @@ class StorageService:
                 file_path.unlink()
                 return True
             return False
+        elif self.backend == "vercel_blob":
+            clean_key = key.removeprefix("/storage/")
+            try:
+                await self.blob_client.delete(clean_key)
+                return True
+            except Exception:
+                return False
         else:
             try:
                 self.s3_client.delete_object(
